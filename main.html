@@ -1747,6 +1747,96 @@
     }
   }
 
+  /* ── Performance Radar — MULTI-SERIES (stacked weeks/months) ─────────────
+     Used by Month view (one polygon per checked Week 1-5) and Year view
+     (one polygon per checked fiscal month), overlaid on the same axes so
+     scores can be compared week-over-week or month-over-month at a glance
+     — mirrors a pivot-chart-style "stack every week's radar on one chart
+     with a checkbox per series" view. `series` is
+     [{ label, color, scores:{label:value} }, ...]; PERFORMANCE_LABELS
+     supplies the fixed axis order/count so every series' polygon lines up
+     on the same spokes regardless of which weeks/months are checked. */
+  function renderPerformanceRadarMulti(series) {
+    const radarSVG = document.getElementById('radarSVG');
+    const legendEl = document.getElementById('radarLegend');
+    const totalEl  = document.getElementById('radarTotal');
+    if (!radarSVG) return;
+
+    const labels = PERFORMANCE_LABELS;
+    const maxVal = 100, steps = [0, 20, 40, 60, 80, 100];
+    const VB_W = 520, VB_H = 500;
+    const cx = VB_W / 2, cy = VB_H / 2 - 6, R = 138, N = labels.length;
+    const angleFor = i => (Math.PI * 2 * i / N) - Math.PI / 2;
+    const ptFor = (i, val) => { const r = (Math.max(0, Math.min(100, val)) / maxVal) * R, a = angleFor(i); return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; };
+
+    let svg = '';
+    steps.forEach(s => {
+      const r = (s / maxVal) * R;
+      let pts = [];
+      for (let i = 0; i < N; i++) { const a = angleFor(i); pts.push(`${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`); }
+      svg += `<polygon points="${pts.join(' ')}" fill="none" stroke="#E3E3E3" stroke-width="1"/>`;
+      if (s > 0) svg += `<text x="${cx + 7}" y="${cy - r + 6}" font-size="16" fill="#A0A0A0">${s}</text>`;
+    });
+    for (let i = 0; i < N; i++) { const a = angleFor(i); svg += `<line x1="${cx}" y1="${cy}" x2="${cx + R * Math.cos(a)}" y2="${cy + R * Math.sin(a)}" stroke="#E3E3E3" stroke-width="1"/>`; }
+
+    // One polygon + dot ring per checked series, all sharing the same spokes.
+    // No per-vertex numeric labels here (unlike the single-series renderer) —
+    // with several overlapping polygons those would collide into noise;
+    // exact values live in the checkbox legend below instead.
+    series.forEach((s, si) => {
+      const values = labels.map(l => Math.max(0, Math.min(100, Number(s.scores[l]) || 0)));
+      const dataPts = labels.map((l, i) => ptFor(i, values[i]));
+      svg += `<polygon points="${dataPts.map(p => p.join(',')).join(' ')}" fill="${s.color}22" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round"/>`;
+      dataPts.forEach((p, i) => {
+        svg += `<circle style="animation-delay:${180 + (si * N + i) * 30}ms" class="radar-dot-pop" cx="${p[0]}" cy="${p[1]}" r="4.5" fill="${s.color}" stroke="#fff" stroke-width="1.5"><title>${s.label} — ${labels[i]}: ${values[i].toFixed(1)}/100</title></circle>`;
+      });
+    });
+
+    const labelR = R + 64;
+    for (let i = 0; i < N; i++) {
+      const a = angleFor(i);
+      let x = cx + labelR * Math.cos(a), y = cy + labelR * Math.sin(a);
+      let anchor = 'middle';
+      if (Math.cos(a) > 0.25) anchor = 'start'; else if (Math.cos(a) < -0.25) anchor = 'end';
+      const words = labels[i].split(' ');
+      const mid = Math.ceil(words.length / 2);
+      const line1 = words.slice(0, mid).join(' '), line2 = words.slice(mid).join(' ');
+      svg += `<text x="${x}" y="${y - 6}" font-size="16" font-weight="700" fill="#444444" text-anchor="${anchor}">${line1}</text>`;
+      if (line2) svg += `<text x="${x}" y="${y + 15}" font-size="16" font-weight="700" fill="#444444" text-anchor="${anchor}">${line2}</text>`;
+    }
+    radarSVG.setAttribute('viewBox', `0 0 ${VB_W} ${VB_H}`);
+    radarSVG.style.fontFamily = "'Plus Jakarta Sans', sans-serif";
+    radarSVG.innerHTML = svg;
+
+    radarSVG.classList.remove('radar-animate-in');
+    void radarSVG.offsetWidth;
+    radarSVG.classList.add('radar-animate-in');
+
+    // Overall score badge: average of the currently-checked series' own averages.
+    const seriesAvgs = series.map(s => labels.reduce((sum, l) => sum + (Number(s.scores[l]) || 0), 0) / N);
+    const avg = seriesAvgs.length ? seriesAvgs.reduce((a, b) => a + b, 0) / seriesAvgs.length : 0;
+    if (totalEl) {
+      const prev = parseFloat(totalEl.textContent) || 0;
+      _animateRadarNumber(totalEl, prev, avg, '<small>/100</small>', 650);
+    }
+
+    // Legend: one row per checked series (color swatch + label + that
+    // series' own average), replacing the single-series "axis: value" list.
+    if (legendEl) {
+      legendEl.innerHTML = '';
+      if (!series.length) {
+        legendEl.innerHTML = '<div class="radar-legend-empty">Check at least one week/month above to show its score.</div>';
+      }
+      series.forEach((s, i) => {
+        const div = document.createElement('div');
+        div.className = 'radar-legend-item';
+        div.style.animationDelay = `${i * 60}ms`;
+        div.innerHTML = `<span class="swatch" style="background:${s.color};"></span>${s.label}: <strong>${seriesAvgs[i].toFixed(1)}</strong>`;
+        legendEl.appendChild(div);
+      });
+    }
+  }
+
   /* ── Year / Month / Week period toggle ───────────────────────────────
      Real scores computed from EVALUATES_DATABASE (Evaluates.js), matching
      the SAME 5 subject keys submitEvaluation() already writes to
@@ -1913,11 +2003,24 @@
   }
 
   let _currentRadarPeriod = 'year';
-  let _currentRadarSubIndex = -1; // -1 = "All" (period-wide average); >=0 = one bucket
+  let _radarCheckedBuckets = new Set(); // Month/Year only: indices of buckets currently checked in the sub-toggle
 
-  /** Populates the Week-1..5 / Jan..Dec sub-toggle under Month/Year, hides it
-   *  for Week (no smaller sub-unit to slice by). Defaults selection to
-   *  whichever bucket contains "today" every time the main period changes. */
+  // Distinct colors assigned by BUCKET INDEX (not check-order), so a given
+  // week/month always keeps the same color as it's toggled on/off — cycles
+  // if there are ever more buckets than colors (12 fiscal months = exact fit).
+  const RADAR_SERIES_COLORS = [
+    '#DA0037', '#2563EB', '#16A34A', '#9333EA', '#EA580C',
+    '#0891B2', '#CA8A04', '#DB2777', '#4F46E5', '#059669',
+    '#DC2626', '#7C3AED'
+  ];
+  function _radarSeriesColor(i) { return RADAR_SERIES_COLORS[i % RADAR_SERIES_COLORS.length]; }
+
+  /** Populates the Week-1..5 / Jan..Dec checkbox row under Month/Year, hides
+   *  it for Week (no smaller sub-unit to slice by). Every bucket starts
+   *  checked whenever the main period tab changes, so switching to Month or
+   *  Year immediately shows every week's/month's polygon stacked on the
+   *  same chart — matching the reference pivot-chart view where all weeks
+   *  are visible at once and can be unchecked individually to compare. */
   function renderRadarSubToggle(period) {
     const wrap = document.getElementById('periodSubToggle');
     if (!wrap) return;
@@ -1925,6 +2028,7 @@
     if (period === 'week') {
       wrap.style.display = 'none';
       wrap.innerHTML = '';
+      renderPerformanceRadar(computeRadarScoresForPeriod('week'));
       return;
     }
 
@@ -1932,30 +2036,41 @@
     const mode = period === 'year' ? 'fy' : 'month';
     const buckets = _buildPeriodBuckets(now, mode);
     const currentIdx = buckets.classify(now);
-    _currentRadarSubIndex = currentIdx >= 0 ? currentIdx : -1;
+    _radarCheckedBuckets = new Set(buckets.labels.map((_, i) => i));
 
-    const items = [{ idx: -1, label: 'All' }].concat(buckets.labels.map((label, i) => ({ idx: i, label })));
-    wrap.innerHTML = items.map(item => `
-      <button type="button" class="${item.idx === _currentRadarSubIndex ? 'active' : ''}" data-idx="${item.idx}">
-        ${item.label}${item.idx === currentIdx ? '<span class="current-dot" title="Current">&nbsp;•</span>' : ''}
-      </button>
+    wrap.innerHTML = buckets.labels.map((label, i) => `
+      <label class="period-subtoggle-chip" style="--chip-color:${_radarSeriesColor(i)};">
+        <input type="checkbox" data-idx="${i}" checked>
+        <span class="chip-swatch"></span>
+        <span>${label}${i === currentIdx ? '<span class="current-dot" title="Current">&nbsp;•</span>' : ''}</span>
+      </label>
     `).join('');
     wrap.style.display = 'flex';
-    wrap.querySelectorAll('button').forEach(btn => {
-      btn.addEventListener('click', () => selectRadarSubBucket(period, parseInt(btn.dataset.idx, 10)));
+    wrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const idx = parseInt(cb.dataset.idx, 10);
+        if (cb.checked) _radarCheckedBuckets.add(idx); else _radarCheckedBuckets.delete(idx);
+        renderCheckedRadarBuckets(period);
+      });
     });
+
+    renderCheckedRadarBuckets(period);
   }
 
-  function selectRadarSubBucket(period, idx) {
-    _currentRadarSubIndex = idx;
-    const wrap = document.getElementById('periodSubToggle');
-    if (wrap) {
-      wrap.querySelectorAll('button').forEach(btn => {
-        btn.classList.toggle('active', parseInt(btn.dataset.idx, 10) === idx);
-      });
-    }
-    const scores = idx === -1 ? computeRadarScoresForPeriod(period) : computeRadarScoresForBucket(period, idx);
-    renderPerformanceRadar(scores);
+  /** Builds one series per currently-checked bucket and hands them to the
+   *  multi-series renderer. Each bucket's score is that bucket's OWN
+   *  average — if several claims were evaluated in the same week/month,
+   *  they're averaged together into that one week's/month's line, per the
+   *  requested "average the claims that landed in the same week" rule. */
+  function renderCheckedRadarBuckets(period) {
+    const now = new Date();
+    const buckets = _buildPeriodBuckets(now, period === 'year' ? 'fy' : 'month');
+    const series = Array.from(_radarCheckedBuckets).sort((a, b) => a - b).map(idx => ({
+      label: buckets.labels[idx],
+      color: _radarSeriesColor(idx),
+      scores: computeRadarScoresForBucket(period, idx),
+    }));
+    renderPerformanceRadarMulti(series);
   }
 
   function setActivePeriod(period) {
@@ -1966,11 +2081,10 @@
         btn.classList.toggle('active', btn.dataset.period === period);
       });
     }
-    renderRadarSubToggle(period); // hides itself for 'week', else sets _currentRadarSubIndex to "today"'s bucket
-    const scores = period === 'week'
-      ? computeRadarScoresForPeriod(period)
-      : (_currentRadarSubIndex === -1 ? computeRadarScoresForPeriod(period) : computeRadarScoresForBucket(period, _currentRadarSubIndex));
-    renderPerformanceRadar(scores);
+    // For 'week' this also renders the (single-series) radar directly; for
+    // month/year it resets every checkbox to checked and renders the
+    // stacked multi-series view — see renderRadarSubToggle().
+    renderRadarSubToggle(period);
   }
 
   function initPeriodToggle() {

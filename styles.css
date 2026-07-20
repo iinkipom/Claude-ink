@@ -809,29 +809,47 @@ body.sidebar-collapsed .sidebar-edge-toggle { left: 0; }
 }
 .period-toggle button:not(.active):hover { color: var(--charcoal); }
 
-/* Sub-slicer under Month (Week 1-5) / Year (Jan-Dec) — picks a single bucket
-   to view on its own instead of the whole period's average ("All"). */
+/* Sub-slicer under Month (Week 1-5) / Year (Jan-Dec) — a checkbox per
+   bucket so several weeks'/months' score polygons can be stacked on the
+   same radar chart at once (all checked by default) instead of viewing
+   only one at a time. Each chip's --chip-color is set inline per bucket so
+   its checkbox/swatch matches that bucket's polygon color on the chart. */
 .period-subtoggle {
   display: flex; flex-wrap: wrap; gap: 6px;
   margin: 10px 18px 0;
 }
-.period-subtoggle button {
+.period-subtoggle-chip {
+  display: inline-flex; align-items: center; gap: 6px;
   font-family: var(--font-body);
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.3px;
   color: var(--charcoal-soft);
   background: rgba(255,255,255,0.55);
   border: 1px solid var(--border);
   border-radius: var(--r-full);
-  padding: 5px 12px;
+  padding: 5px 12px 5px 8px;
   cursor: pointer;
   white-space: nowrap;
   transition: background .15s, color .15s, border-color .15s;
 }
-.period-subtoggle button:not(.active):hover { border-color: var(--red); color: var(--red); }
-.period-subtoggle button.active {
-  background: var(--red); border-color: var(--red); color: #fff;
+.period-subtoggle-chip:hover { border-color: var(--chip-color, var(--red)); }
+.period-subtoggle-chip input[type="checkbox"] {
+  accent-color: var(--chip-color, var(--red));
+  width: 13px; height: 13px; cursor: pointer; margin: 0;
 }
-.period-subtoggle button .current-dot { opacity: 0.85; }
+.period-subtoggle-chip .chip-swatch {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--chip-color, var(--red));
+  flex-shrink: 0;
+}
+.period-subtoggle-chip:has(input:checked) {
+  background: color-mix(in srgb, var(--chip-color, var(--red)) 14%, white);
+  border-color: var(--chip-color, var(--red));
+  color: var(--charcoal);
+}
+.period-subtoggle-chip:has(input:not(:checked)) { opacity: 0.55; }
+.period-subtoggle-chip .current-dot { opacity: 0.85; color: var(--red); }
+
+.radar-legend-empty { font-size: 12px; color: var(--charcoal-soft); padding: 8px 4px; }
 
 .radar-card-body { padding: 8px 14px 8px; flex: 1; display: flex; align-items: center; }
 .radar-card-body svg { width: 100%; height: auto; max-height: 420px; }
