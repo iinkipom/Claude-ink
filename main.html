@@ -164,6 +164,11 @@
           <button type="button" data-period="month">Month</button>
           <button type="button" data-period="week">Week</button>
         </div>
+        <!-- Sub-slicer: appears under Month (weeks 1-5) and Year (12 fiscal
+             months) so a specific bucket's score can be viewed on its own
+             instead of only the period-wide average. Hidden for Week (no
+             smaller sub-unit to slice by). Populated by renderRadarSubToggle(). -->
+        <div class="period-subtoggle" id="periodSubToggle" style="display:none;"></div>
 
         <div class="radar-card-body">
           <svg id="radarSVG" viewBox="0 0 520 500" xmlns="http://www.w3.org/2000/svg"></svg>
@@ -1832,27 +1837,38 @@
    *  landed in it, rather than every claim counting equally. Week view
    *  has no smaller sub-unit to bucket by, so it stays a flat average of
    *  every evaluation in that week. */
-  function computeRadarScoresForPeriod(period) {
+  /** Evaluation records (Evaluates.js rows) belonging to the logged-in user,
+   *  regardless of period — shared by computeRadarScoresForPeriod() and
+   *  computeRadarScoresForBucket() so both start from the same filtered set. */
+  function _myEvaluationRecords() {
     const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
     const myEmpId     = String(profile.empId || '').trim();
     const myFirstName = String(profile.firstName || '').trim().toLowerCase();
-    const now = new Date();
-
     const db = (typeof EVALUATES_DATABASE !== 'undefined' && Array.isArray(EVALUATES_DATABASE)) ? EVALUATES_DATABASE : [];
-    const myEvals = db.filter(e => _evaluateRecordMatchesUser(e, myEmpId, myFirstName));
+    return db.filter(e => _evaluateRecordMatchesUser(e, myEmpId, myFirstName));
+  }
 
+  /** Turns a list of evaluation records into {label: value(0-100)}, filling
+   *  in RADAR_DEFAULT_MAX for any subject with no usable submissions. */
+  function _scoresFromEvals(evals) {
     const scores = {};
+    PERFORMANCE_LABELS.forEach(label => {
+      const key = PERFORMANCE_LABEL_TO_KEY[label];
+      const avg = _avgEvaluateValue(evals, key);
+      scores[label] = Math.round((avg ?? RADAR_DEFAULT_MAX) * 10) / 10;
+    });
+    return scores;
+  }
+
+  function computeRadarScoresForPeriod(period) {
+    const myEvals = _myEvaluationRecords();
+    const now = new Date();
 
     if (period === 'week') {
       const rangeStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
       const rangeEnd   = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate() + 7);
       const weekEvals = myEvals.filter(e => { const d = _evaluateRecordDate(e); return d && d >= rangeStart && d < rangeEnd; });
-      PERFORMANCE_LABELS.forEach(label => {
-        const key = PERFORMANCE_LABEL_TO_KEY[label];
-        const avg = _avgEvaluateValue(weekEvals, key);
-        scores[label] = Math.round((avg ?? RADAR_DEFAULT_MAX) * 10) / 10;
-      });
-      return scores;
+      return _scoresFromEvals(weekEvals);
     }
 
     // 'month' -> 5 week-of-month buckets; 'year' -> 12 fiscal-year month
@@ -1867,6 +1883,7 @@
       if (idx >= 0) bucketEvals[idx].push(e);
     });
 
+    const scores = {};
     PERFORMANCE_LABELS.forEach(label => {
       const key = PERFORMANCE_LABEL_TO_KEY[label];
       const bucketAverages = bucketEvals
@@ -1880,7 +1897,66 @@
     return scores;
   }
 
+  /** Same idea as computeRadarScoresForPeriod(), but for ONE bucket only —
+   *  one week-of-month (Month view) or one fiscal-year month (Year view) —
+   *  so the sub-toggle can show a single week's/month's score on its own
+   *  instead of the whole period's average. */
+  function computeRadarScoresForBucket(period, bucketIndex) {
+    const myEvals = _myEvaluationRecords();
+    const now = new Date();
+    const buckets = _buildPeriodBuckets(now, period === 'year' ? 'fy' : 'month');
+    const evalsInBucket = myEvals.filter(e => {
+      const d = _evaluateRecordDate(e);
+      return d && buckets.classify(d) === bucketIndex;
+    });
+    return _scoresFromEvals(evalsInBucket);
+  }
+
   let _currentRadarPeriod = 'year';
+  let _currentRadarSubIndex = -1; // -1 = "All" (period-wide average); >=0 = one bucket
+
+  /** Populates the Week-1..5 / Jan..Dec sub-toggle under Month/Year, hides it
+   *  for Week (no smaller sub-unit to slice by). Defaults selection to
+   *  whichever bucket contains "today" every time the main period changes. */
+  function renderRadarSubToggle(period) {
+    const wrap = document.getElementById('periodSubToggle');
+    if (!wrap) return;
+
+    if (period === 'week') {
+      wrap.style.display = 'none';
+      wrap.innerHTML = '';
+      return;
+    }
+
+    const now = new Date();
+    const mode = period === 'year' ? 'fy' : 'month';
+    const buckets = _buildPeriodBuckets(now, mode);
+    const currentIdx = buckets.classify(now);
+    _currentRadarSubIndex = currentIdx >= 0 ? currentIdx : -1;
+
+    const items = [{ idx: -1, label: 'All' }].concat(buckets.labels.map((label, i) => ({ idx: i, label })));
+    wrap.innerHTML = items.map(item => `
+      <button type="button" class="${item.idx === _currentRadarSubIndex ? 'active' : ''}" data-idx="${item.idx}">
+        ${item.label}${item.idx === currentIdx ? '<span class="current-dot" title="Current">&nbsp;•</span>' : ''}
+      </button>
+    `).join('');
+    wrap.style.display = 'flex';
+    wrap.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => selectRadarSubBucket(period, parseInt(btn.dataset.idx, 10)));
+    });
+  }
+
+  function selectRadarSubBucket(period, idx) {
+    _currentRadarSubIndex = idx;
+    const wrap = document.getElementById('periodSubToggle');
+    if (wrap) {
+      wrap.querySelectorAll('button').forEach(btn => {
+        btn.classList.toggle('active', parseInt(btn.dataset.idx, 10) === idx);
+      });
+    }
+    const scores = idx === -1 ? computeRadarScoresForPeriod(period) : computeRadarScoresForBucket(period, idx);
+    renderPerformanceRadar(scores);
+  }
 
   function setActivePeriod(period) {
     _currentRadarPeriod = period;
@@ -1890,7 +1966,11 @@
         btn.classList.toggle('active', btn.dataset.period === period);
       });
     }
-    renderPerformanceRadar(computeRadarScoresForPeriod(period));
+    renderRadarSubToggle(period); // hides itself for 'week', else sets _currentRadarSubIndex to "today"'s bucket
+    const scores = period === 'week'
+      ? computeRadarScoresForPeriod(period)
+      : (_currentRadarSubIndex === -1 ? computeRadarScoresForPeriod(period) : computeRadarScoresForBucket(period, _currentRadarSubIndex));
+    renderPerformanceRadar(scores);
   }
 
   function initPeriodToggle() {
