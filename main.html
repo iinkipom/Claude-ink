@@ -1209,16 +1209,34 @@
   const SAVE_CLOSE_CLAIM_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/f5e1f850c4b04190ac04690ff58bbba1/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=QhW_zhSs8UQBWsO37qlceoGghYA8c4zvrYPKZwk8rYc";
 
   // ── VERIFY CLAIM URL ─────────────────────────────────────────────────────
-  // Fired from the "Verify Claim" page when a reviewer submits OK/NG
-  // decisions for a claim's Corrective/Preventive actions. Should:
+  // Fired from the "Verify Claim" page in two situations:
+  //   (a) a Team Leader assigns a verify person to one action (tabSave:
+  //       'assignVerifier' — only verificationAssignees is meaningful)
+  //   (b) the assigned verify person (or the Team Leader) submits evidence
+  //       + OK/NG for one or more actions
+  // Should:
   //   1. Write verificationData (text, same "[Corrective N] OK/NG: reason"
   //      format as actionPlan) into a VerificationData column
-  //   2. Upload each attached evidence photo and write the resulting links
-  //      into a VerificationImages column (JSON array of URLs), same
-  //      pattern as InvestigationImages/ConsiderationImages
-  //   3. If every action was marked OK, the status field will be "Verified"
+  //   2. Write verificationAssignees (JSON: {"Corrective_1":{empId,
+  //      firstName,lastName}, ...} — who is responsible for verifying each
+  //      action, picked from that claim's confirmed Investigation players)
+  //      into a VerificationAssignees column
+  //   3. Write verificationTimestamps (JSON: {"Corrective_1":"<ISO date>",
+  //      ...} — when the assigned person actually submitted THAT action's
+  //      verification) into a VerificationTimestamps column. This is what
+  //      Evaluate subject 5 (evalNotifySpeed) reads back for a Player's
+  //      score — see computeNotifyShopScore()'s Player branch.
+  //   4. Upload each attached evidence photo to SharePoint at:
+  //      https://macoth.sharepoint.com/sites/qcbackupshared/General/Claim_images/6.Verification/
+  //      and write the resulting links into a VerificationImages column
+  //      (JSON array of URLs), same pattern as InvestigationImages/
+  //      ConsiderationImages — each filename is pre-tagged client-side as
+  //      "VerifyCorrectiveN_..." / "VerifyPreventiveN_..." so it can be
+  //      routed back to the right action on reopen.
+  //   5. If every action was marked OK, the status field will be "Verified"
   //      (client already computes this — just write it through as usual)
-  // Payload sent: { id, verificationData, status, verificationImagesBase64[] }
+  // Payload sent: { id, verificationData, verificationAssignees,
+  //                 verificationTimestamps, status, verificationImagesBase64[] }
   // PASTE YOUR "SmartQC - VerifyClaim" PAD/Power Automate HTTP TRIGGER URL
   // BELOW — this is currently a placeholder, so submitVerification() will
   // save locally (selectedClaimData) and no-op the network call until you
@@ -3974,12 +3992,55 @@
     return { score: _interpScore(5 - Math.min(5, n), 5, range) };
   }
 
-  /* ── Subject 5: Notify Concerned Shop / Appointment (AUTO, Team Leader
-     only). Gate: an appointment must exist (meetingDate — see
-     makeAppointment()). Span: earliest Finding Risk timestamp → CloseDate. */
-  function computeNotifyShopScore(claim) {
+  /* ── Subject 5: Notify Concerned Shop / Appointment (Team Leader) — OR —
+     Verification Speed (Player, added alongside Verify Claim).
+     Team Leader span: earliest Finding Risk timestamp → CloseDate, gated
+     on an appointment (meetingDate) existing.
+     Player span: for every action they're the assigned "verify person" on
+     (Verify Claim's per-action assignment — see openVerifyWorkspace),
+     once that action's own Effective Date has been reached, from that
+     Effective Date → the timestamp they actually submitted their
+     verification (evidence + OK/NG). A player with several qualifying
+     actions on this claim gets the average of each action's own score —
+     same "average per-bucket, not per-item" convention as the radar
+     chart's weekly/monthly buckets. An action whose Effective Date hasn't
+     been reached yet, or where this player isn't assigned anything at
+     all, doesn't count against them yet. */
+  function computeNotifyShopScore(claim, role) {
     if (isLowTierFixedScore(claim)) return { score: 2, fixed: true };
     const range = getEvaluateScoreRange(claim);
+
+    if (role === 'Player') {
+      const myKeys = _myVerificationAssignments(claim);
+      if (!myKeys.length) return { score: null, reason: 'คุณไม่ได้รับมอบหมายให้เป็นผู้ตรวจสอบ (Verify) Action ใดในเคสนี้' };
+
+      const apText = resolveField(claim, ['actionPlan', 'ActionPlan', 'action_plan'], '');
+      const timestamps = _getVerificationTimestamps(claim);
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+
+      let anyReached = false;
+      const scores = [];
+      myKeys.forEach(key => {
+        const [type, numStr] = key.split('_');
+        const entry = _extractActionTextByBlock(apText, type)[parseInt(numStr, 10)];
+        const eff = entry && entry.eff && entry.eff !== 'TBD' ? entry.eff : null;
+        if (!eff) return; // no Effective Date set on this action — not measurable
+        const effDate = new Date(eff); effDate.setHours(0, 0, 0, 0);
+        if (effDate > today) return; // Effective Date not reached yet — doesn't count yet
+        anyReached = true;
+        const ts = timestamps[key];
+        if (!ts) return; // reached, but this player hasn't submitted their verification yet
+        const days = calculateClaimTakeTime(eff, ts), hours = _hoursBetween(eff, ts);
+        const rank = _dayRankIndex(days) * 3 + _hoursRankIndex(hours);
+        scores.push(_interpScore(rank, 15, range));
+      });
+
+      if (!anyReached) return { score: null, reason: 'ยังไม่ถึงวันที่ Effective Date ของ Action ที่คุณรับผิดชอบ' };
+      if (!scores.length) return { score: null, reason: 'รอการยืนยันผลตรวจสอบ (Verify) ของคุณใน Action ที่ถึงกำหนดแล้ว' };
+      return { score: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) };
+    }
+
+    // Team Leader (unchanged from before Verify Claim existed)
     const meetingDate = claim && (claim.meetingDate || claim.MeetingDate);
     if (!meetingDate) return { score: null, reason: 'No appointment recorded yet — click "Make Appointment" first.' };
     const start = _firstFindingRiskTimestampOverall(claim);
@@ -4022,11 +4083,11 @@
     },
     {
       key:        'evalNotifySpeed',
-      title:      'คุณสามารถนัดประชุมพูดคุยและแจ้งคำร้องเรียนให้หน่วยงานที่เกี่ยวข้องทราบปัญหา ได้ภายใน 2 วันทำการ',
-      detail:     'คะแนนนี้คำนวณอัตโนมัติจากเวลานัดหมายและปิดเคส (เฉพาะ Team Leader) ไม่ต้องกรอกข้อมูลเพิ่มเติม',
+      title:      'คุณสามารถนัดประชุมพูดคุยและแจ้งคำร้องเรียนให้หน่วยงานที่เกี่ยวข้องทราบปัญหา ได้ภายใน 2 วันทำการ (Team Leader) / ความเร็วในการตรวจสอบ (Verify) Action ที่ได้รับมอบหมายหลังถึงกำหนด Effective Date (Player)',
+      detail:     'Team Leader: คำนวณอัตโนมัติจากเวลานัดหมายและปิดเคส · Player: คำนวณอัตโนมัติจากระยะเวลานับตั้งแต่ Effective Date ของ Action ที่ได้รับมอบหมายให้ตรวจสอบ (หน้า Verify Claim) จนถึงเวลาที่คุณส่งผลตรวจสอบ ไม่ต้องกรอกข้อมูลเพิ่มเติม',
       inputType:  'auto',
       computeFn:  computeNotifyShopScore,
-      appliesTo:  ['Team Leader']
+      appliesTo:  ['Team Leader', 'Player']
     }
   ];
 
@@ -4044,24 +4105,31 @@
       || statusVal.includes('Investigated');
   }
 
+  /** The confirmed Players (Investigation Step 1) for a claim, as an array
+   *  of up to 5 {firstName,lastName,empId} entries (nulls for empty slots).
+   *  Prefers claim._playerSlots (full objects, same session — set by
+   *  confirmPlayers()); falls back to the flat player1..player5 name
+   *  strings claims.js exports after a fresh load / logout. Shared by
+   *  getCurrentUserPlayerSlotInfo() (Evaluate-tab gating) and the Verify
+   *  Claim "select verify person" picker (same pool of people). */
+  function _getClaimPlayerSlots(claim) {
+    if (claim && claim._playerSlots && claim._playerSlots.some(Boolean)) return claim._playerSlots;
+    const slots = [];
+    for (let i = 0; i < 5; i++) {
+      const raw = claim && (claim[`player${i+1}`] || claim[`Player${i+1}`]) || '';
+      const name = typeof raw === 'string' ? raw.trim() : '';
+      slots.push(name ? { firstName: name.split(' ')[0] || name, lastName: name.split(' ').slice(1).join(' ') || '', empId: '' } : null);
+    }
+    return slots;
+  }
+
   /* Is the currently logged-in user one of the confirmed Players (Step 1)? */
   function getCurrentUserPlayerSlotInfo(claim) {
     const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
     const myEmpId = String(profile.empId || '').trim();
     const myName  = `${profile.firstName || ''} ${profile.lastName || ''}`.trim();
 
-    let slots = [];
-    if (claim && claim._playerSlots && claim._playerSlots.some(Boolean)) {
-      slots = claim._playerSlots;
-    } else if (claim) {
-      slots = [];
-      for (let i = 0; i < 5; i++) {
-        const raw = claim[`player${i+1}`] || claim[`Player${i+1}`] || '';
-        const name = typeof raw === 'string' ? raw.trim() : '';
-        slots.push(name ? { firstName: name.split(' ')[0] || name, lastName: name.split(' ').slice(1).join(' ') || '', empId: '' } : null);
-      }
-    }
-
+    const slots = _getClaimPlayerSlots(claim);
     const found = slots.find(p => {
       if (!p) return false;
       const pEmpId = String(p.empId || '').trim();
@@ -6737,8 +6805,70 @@
      "verificationImages" field (same convention as InvestigationImages),
      and — only once EVERY action on the claim is marked OK — advances the
      claim's status to "Verified" via the existing forward-only pipeline.
+
+     ── Per-action verify-person assignment ──────────────────────────────
+     A Team Leader picks WHO verifies each Corrective/Preventive action
+     (from that claim's confirmed Investigation players — same pool as
+     _getClaimPlayerSlots()). Stored as a JSON map on the claim,
+     `verificationAssignees`: {"Corrective_1":{empId,firstName,lastName},
+     "Preventive_2":{...}}. Only the Team Leader sees the assign control;
+     everyone else sees a read-only "Assigned to: X" label. The assigned
+     player can attach evidence + OK/NG on THEIR action(s) only — every
+     other action on the same claim is read-only for them, even though
+     they can still see it for context.
      ═══════════════════════════════════════════════════════════════════════ */
-  let verifyState = {}; // `${type}_${num}` -> { result: 'OK'|'NG'|null, reason: '' }
+  let verifyState = {}; // `${type}_${num}` -> { result: 'OK'|'NG'|null, reason: '', assignee: {empId,firstName,lastName}|null }
+
+  function _getVerificationAssignees(claim) {
+    try { return JSON.parse(resolveField(claim || {}, ['verificationAssignees', 'VerificationAssignees'], '{}')) || {}; }
+    catch (_) { return {}; }
+  }
+
+  function _getVerificationTimestamps(claim) {
+    try { return JSON.parse(resolveField(claim || {}, ['verificationTimestamps', 'VerificationTimestamps'], '{}')) || {}; }
+    catch (_) { return {}; }
+  }
+
+  /** Every "type_num" action key the CURRENTLY LOGGED-IN user is the
+   *  assigned verify person for, on the given claim. Used both to gate
+   *  which controls a Player can interact with on Verify Claim, and by
+   *  computeNotifyShopScore()'s Player branch (evaluate subject 5). */
+  function _myVerificationAssignments(claim) {
+    const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
+    const myEmpId = String(profile.empId || '').trim();
+    const myName  = `${profile.firstName || ''} ${profile.lastName || ''}`.trim();
+    const assignees = _getVerificationAssignees(claim);
+    return Object.keys(assignees).filter(key => {
+      const a = assignees[key];
+      if (!a) return false;
+      const aEmpId = String(a.empId || '').trim();
+      const aName  = `${a.firstName || ''} ${a.lastName || ''}`.trim();
+      if (myEmpId && aEmpId) return aEmpId === myEmpId;
+      return aName && myName && aName === myName;
+    });
+  }
+
+  /** Immediately persists the CURRENT verifyState assignments (fire-and-
+   *  forget, like confirmPlayers()/advanceClaimStatus()) so picking a
+   *  verifier isn't lost if the Team Leader navigates away before hitting
+   *  "Submit Verification". Does NOT touch results/photos/status. */
+  async function _saveVerificationAssignees() {
+    if (!selectedClaimId) return;
+    const assignees = {};
+    Object.keys(verifyState).forEach(key => {
+      if (verifyState[key] && verifyState[key].assignee) assignees[key] = verifyState[key].assignee;
+    });
+    const assigneesJson = JSON.stringify(assignees);
+    if (selectedClaimData) selectedClaimData.verificationAssignees = assigneesJson;
+    if (SAVE_VERIFICATION_URL && !SAVE_VERIFICATION_URL.startsWith('PASTE_')) {
+      try {
+        await fetch(SAVE_VERIFICATION_URL, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: selectedClaimId.toString(), verificationAssignees: assigneesJson, tabSave: 'assignVerifier' })
+        });
+      } catch (e) { console.log('_saveVerificationAssignees (CORS suppressed):', e); }
+    }
+  }
 
   /** Parses "[Corrective N] OK: reason\n\n[Preventive M] NG: reason..." (the
    *  format submitVerification() writes) back into
@@ -6796,10 +6926,19 @@
       window.ACTIVE_CLAIMS_DATABASE = result.ACTIVE_CLAIMS_DATABASE;
       activeClaimsList = result.ACTIVE_CLAIMS_DATABASE;
 
+      // Access control: a Team Leader (on that specific claim) always sees
+      // it; a Player only sees claims where they're the assigned verify
+      // person on at least one action. Same per-claim role check Verify
+      // Claim's workspace itself uses, so what's visible in the queue
+      // always matches what's actually openable.
       const queue = activeClaimsList.filter(c => {
         const raw = c.status ?? c.Status ?? c.ClaimStatus ?? c.Claim_Status ?? null;
         const val = raw === null ? '' : (typeof raw === 'object' ? (raw.Value || raw.value || '') : String(raw).trim());
-        return val === 'QC Investigated';
+        if (val !== 'QC Investigated') return false;
+        const role = getCurrentUserRoleOnClaim(c);
+        if (role === 'Team Leader') return true;
+        if (role === 'Player') return _myVerificationAssignments(c).length > 0;
+        return false;
       });
 
       if (!queue.length) {
@@ -6848,7 +6987,12 @@
   /** Builds one action-checklist row: description (read-only — this page
    *  verifies the plan, it doesn't edit it), Eff/Due dates with a
    *  "ready to verify" badge, evidence photo attach, and OK/NG buttons. */
-  function _renderVerifyActionBlock(type, num, entry, containerEl) {
+  /** `role` is the CURRENT logged-in user's role on this claim ('Team
+   *  Leader' | 'Player' | null). `canAct` is whether they may attach
+   *  evidence / call OK-NG on THIS specific action: always true for the
+   *  Team Leader, true for a Player only if they're this action's
+   *  assigned verifier. The assign picker itself is Team-Leader-only. */
+  function _renderVerifyActionBlock(type, num, entry, containerEl, role) {
     const eff = entry.eff && entry.eff !== 'TBD' ? entry.eff : '';
     const due = entry.due && entry.due !== 'TBD' ? entry.due : '';
     const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -6863,6 +7007,52 @@
     const key = `${type}_${num}`;
     const state = verifyState[key] || {};
     const containerId = `verifyPrev_${type}_${num}`;
+    const isTeamLeader = role === 'Team Leader';
+    const canAct = isTeamLeader || (role === 'Player' && _myVerificationAssignments(selectedClaimData).includes(key));
+
+    const assignee = state.assignee;
+    const assigneeName = assignee ? `${assignee.firstName || ''} ${assignee.lastName || ''}`.trim() : '';
+    const playerSlots = isTeamLeader ? _getClaimPlayerSlots(selectedClaimData) : [];
+    const playerOptionsHtml = playerSlots.map((p, i) => p
+      ? `<option value="${i}" ${assignee && String(assignee.empId||'')===String(p.empId||'') && String(assignee.firstName||'')===String(p.firstName||'') ? 'selected' : ''}>${escapeHtml(`${p.firstName||''} ${p.lastName||''}`.trim())}</option>`
+      : '').join('');
+
+    const assignRowHtml = `
+      <div style="margin-bottom:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span style="font-size:11px; color:var(--charcoal-soft);">Verify Person:</span>
+        <span id="verifyAssigneeLabel_${key}" style="font-size:12px; font-weight:700; color:${assigneeName ? 'var(--charcoal)' : 'var(--charcoal-soft)'};">${assigneeName || 'Not assigned yet'}</span>
+        ${isTeamLeader ? `
+          <button type="button" class="action-btn" style="background:var(--surface-2); color:var(--charcoal); border:1px solid var(--border);" onclick="toggleAssignPicker('${type}',${num})">👤 ${assigneeName ? 'Change' : 'Assign'} Verifier</button>
+          <select id="verifyAssignSelect_${key}" class="form-control hidden" style="max-width:220px;" onchange="assignVerifyPerson('${type}',${num}, this.value)">
+            <option value="">— Select player —</option>
+            ${playerOptionsHtml}
+          </select>
+        ` : ''}
+      </div>`;
+
+    const actionControlsHtml = canAct ? `
+      <div class="form-group" style="margin-bottom:12px;">
+        <label style="font-size:11px;">Evidence Picture(s)</label>
+        <input type="file" class="form-control" accept="image/*" multiple onchange="handleInvestigationPreviews(this,'${containerId}')">
+        <div id="${containerId}" class="preview-grid"></div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button type="button" class="action-btn btn-verify-ok ${state.result === 'OK' ? 'selected' : ''}" onclick="setVerifyResult('${type}',${num},'OK')">✅ OK</button>
+        <button type="button" class="action-btn btn-verify-ng ${state.result === 'NG' ? 'selected' : ''}" onclick="setVerifyResult('${type}',${num},'NG')">❌ NG</button>
+      </div>
+      <div id="verifyReason_${type}_${num}" class="dynamic-input-wrap ${state.result === 'NG' ? '' : 'hidden'}" style="margin-top:10px;">
+        <textarea class="form-control" placeholder="Reason for NG…" oninput="verifyState['${key}'].reason=this.value" style="min-height:50px;">${escapeHtml(state.reason || '')}</textarea>
+      </div>
+    ` : `
+      <div class="form-group" style="margin-bottom:0;">
+        <label style="font-size:11px;">Evidence Picture(s)</label>
+        <div id="${containerId}" class="preview-grid"></div>
+        <div style="font-size:11px; color:var(--charcoal-soft); margin-top:6px;">
+          ${assigneeName ? `Only ${escapeHtml(assigneeName)} (the assigned verify person) can attach evidence or mark this action.` : 'No verify person assigned yet — the Team Leader needs to assign one before this action can be verified.'}
+        </div>
+        ${state.result ? `<div style="margin-top:8px;"><span class="status-badge ${state.result==='OK'?'status-done':'status-active'}">${state.result}</span></div>` : ''}
+      </div>
+    `;
 
     const wrap = document.createElement('div');
     wrap.className = 'action-block';
@@ -6877,28 +7067,56 @@
         <span><strong>Effective:</strong> ${eff ? formatDateDisplay(eff) : '—'}</span>
         <span><strong>Due:</strong> ${due ? formatDateDisplay(due) : '—'}</span>
       </div>
-      <div class="form-group" style="margin-bottom:12px;">
-        <label style="font-size:11px;">Evidence Picture(s)</label>
-        <input type="file" class="form-control" accept="image/*" multiple onchange="handleInvestigationPreviews(this,'${containerId}')">
-        <div id="${containerId}" class="preview-grid"></div>
-      </div>
-      <div style="display:flex; gap:8px; align-items:center;">
-        <button type="button" class="action-btn btn-verify-ok ${state.result === 'OK' ? 'selected' : ''}" onclick="setVerifyResult('${type}',${num},'OK')">✅ OK</button>
-        <button type="button" class="action-btn btn-verify-ng ${state.result === 'NG' ? 'selected' : ''}" onclick="setVerifyResult('${type}',${num},'NG')">❌ NG</button>
-      </div>
-      <div id="verifyReason_${type}_${num}" class="dynamic-input-wrap ${state.result === 'NG' ? '' : 'hidden'}" style="margin-top:10px;">
-        <textarea class="form-control" placeholder="Reason for NG…" oninput="verifyState['${key}'].reason=this.value" style="min-height:50px;">${escapeHtml(state.reason || '')}</textarea>
-      </div>
+      ${assignRowHtml}
+      ${actionControlsHtml}
     `;
     containerEl.appendChild(wrap);
   }
 
+  /** Toggles the (Team-Leader-only) verify-person <select> for one action. */
+  function toggleAssignPicker(type, num) {
+    const sel = document.getElementById(`verifyAssignSelect_${type}_${num}`);
+    if (sel) sel.classList.toggle('hidden');
+  }
+
+  /** Assigns the chosen confirmed-Investigation player as this action's
+   *  verify person, persists it immediately, and updates the label. The
+   *  assigner is always the Team Leader (only they see this control), who
+   *  already has full access to every action regardless of assignment —
+   *  so unlike setVerifyResult() there's no need to re-render the block's
+   *  lock state here, only the visible assignee name. */
+  function assignVerifyPerson(type, num, slotIndexStr) {
+    if (slotIndexStr === '') return;
+    const key = `${type}_${num}`;
+    const slots = _getClaimPlayerSlots(selectedClaimData);
+    const player = slots[parseInt(slotIndexStr, 10)];
+    if (!player) return;
+    if (!verifyState[key]) verifyState[key] = {};
+    verifyState[key].assignee = { empId: player.empId || '', firstName: player.firstName || '', lastName: player.lastName || '' };
+
+    const label = document.getElementById(`verifyAssigneeLabel_${key}`);
+    if (label) { label.textContent = `${player.firstName || ''} ${player.lastName || ''}`.trim(); label.style.color = 'var(--charcoal)'; }
+    const sel = document.getElementById(`verifyAssignSelect_${key}`);
+    if (sel) sel.classList.add('hidden');
+
+    _saveVerificationAssignees();
+  }
+
   /** Toggles an action's OK/NG call (clicking the already-selected one
-   *  clears it back to undecided) and shows/hides the NG reason box. */
+   *  clears it back to undecided) and shows/hides the NG reason box.
+   *  Marks the action "touchedNow" so submitVerification() knows THIS is a
+   *  fresh decision made in the current visit — as opposed to a result
+   *  that was merely restored from an earlier save — and only stamps a
+   *  new verification timestamp for actions actually touched this way.
+   *  Without that distinction, anyone re-submitting the form (e.g. the
+   *  Team Leader saving after just assigning a different action) would
+   *  overwrite another action's ALREADY-verified timestamp with "now",
+   *  corrupting the speed calculation behind evaluate subject 5. */
   function setVerifyResult(type, num, result) {
     const key = `${type}_${num}`;
     if (!verifyState[key]) verifyState[key] = { reason: '' };
     verifyState[key].result = verifyState[key].result === result ? null : result;
+    verifyState[key].touchedNow = true;
 
     const block = document.getElementById(`verifyBlock_${type}_${num}`);
     if (block) {
@@ -6944,6 +7162,26 @@
     const apText = resolveField(claim, ['actionPlan', 'ActionPlan', 'action_plan'], '');
     const verifDataRaw = resolveField(claim, ['verificationData', 'VerificationData'], '');
     verifyState = _extractVerificationByBlock(verifDataRaw);
+    // Merge in any saved verify-person assignments (separate field/JSON from
+    // the OK/NG results parsed above) so reopening shows who's assigned.
+    const savedAssignees = _getVerificationAssignees(claim);
+    Object.keys(savedAssignees).forEach(key => {
+      if (!verifyState[key]) verifyState[key] = {};
+      verifyState[key].assignee = savedAssignees[key];
+    });
+
+    const role = getCurrentUserRoleOnClaim(claim);
+    const correctiveWrap = document.getElementById('verifyCorrectiveWrap'); correctiveWrap.innerHTML = '';
+    const preventiveWrap = document.getElementById('verifyPreventiveWrap'); preventiveWrap.innerHTML = '';
+
+    // Defensive gate — the queue already only lists claims a Player is
+    // assigned on, so this should only trigger via a stale/direct call.
+    if (!role) {
+      correctiveWrap.innerHTML = '<p style="font-size:12px;color:var(--charcoal-soft);">You are not the Team Leader or an assigned verify person for this claim.</p>';
+      preventiveWrap.innerHTML = '';
+      document.getElementById('verifyStatusMsg').textContent = '';
+      return;
+    }
 
     const verifyImgRaw = claim.verificationImages || claim.VerificationImages || '';
     const correctiveByBlock = _extractActionTextByBlock(apText, 'Corrective');
@@ -6953,16 +7191,16 @@
     const correctiveNums = Array.from(new Set([...Object.keys(correctiveByBlock).map(Number), ...correctiveImgNums])).sort((a, b) => a - b);
     const preventiveNums = Array.from(new Set([...Object.keys(preventiveByBlock).map(Number), ...preventiveImgNums])).sort((a, b) => a - b);
 
-    const correctiveWrap = document.getElementById('verifyCorrectiveWrap'); correctiveWrap.innerHTML = '';
-    const preventiveWrap = document.getElementById('verifyPreventiveWrap'); preventiveWrap.innerHTML = '';
-
     if (!correctiveNums.length) correctiveWrap.innerHTML = '<p style="font-size:12px;color:var(--charcoal-soft);">No corrective actions were recorded for this claim.</p>';
-    else correctiveNums.forEach(n => _renderVerifyActionBlock('Corrective', n, correctiveByBlock[n] || { text: '', eff: '', due: '' }, correctiveWrap));
+    else correctiveNums.forEach(n => _renderVerifyActionBlock('Corrective', n, correctiveByBlock[n] || { text: '', eff: '', due: '' }, correctiveWrap, role));
 
     if (!preventiveNums.length) preventiveWrap.innerHTML = '<p style="font-size:12px;color:var(--charcoal-soft);">No preventive actions were recorded for this claim.</p>';
-    else preventiveNums.forEach(n => _renderVerifyActionBlock('Preventive', n, preventiveByBlock[n] || { text: '', eff: '', due: '' }, preventiveWrap));
+    else preventiveNums.forEach(n => _renderVerifyActionBlock('Preventive', n, preventiveByBlock[n] || { text: '', eff: '', due: '' }, preventiveWrap, role));
 
     // Restore evidence photos: same-session memory store, else from saved URLs
+    // (only containers that actually got rendered above — i.e. only actions
+    // this user has evidence-attach access to — have an <input>/preview div
+    // to restore into; read-only blocks still show a bare preview-grid).
     const hasMemoryPhotos = Object.keys(investigationImageStore).some(k => investigationImageStore[k]?.length > 0);
     if (hasMemoryPhotos) {
       correctiveNums.forEach(n => { restorePreviewsFromStore(`verifyPrev_Corrective_${n}`); makePreviewClickable(document.getElementById(`verifyPrev_Corrective_${n}`)); });
@@ -6985,6 +7223,13 @@
       let vData = [];
       let verifyImgs = [];
       let totalBlocks = 0, okBlocks = 0;
+      // Start from whatever was already saved so an untouched action keeps
+      // its ORIGINAL verification timestamp — only actions actually
+      // clicked (OK/NG) THIS visit (see setVerifyResult's touchedNow) get
+      // stamped with the current time.
+      const timestamps = _getVerificationTimestamps(selectedClaimData);
+      const assignees = {};
+      const nowIso = new Date().toISOString();
 
       for (const type of ['Corrective', 'Preventive']) {
         const wrap = document.getElementById(type === 'Corrective' ? 'verifyCorrectiveWrap' : 'verifyPreventiveWrap');
@@ -6995,10 +7240,12 @@
           const key = `${type}_${num}`;
           const state = verifyState[key] || {};
           totalBlocks++;
+          if (state.assignee) assignees[key] = state.assignee;
           if (state.result) {
             const reasonPart = state.result === 'NG' && state.reason ? `: ${state.reason}` : '';
             vData.push(`[${type} ${num}] ${state.result}${reasonPart}`);
             if (state.result === 'OK') okBlocks++;
+            if (state.touchedNow) timestamps[key] = nowIso;
           }
           // Evidence photos are collected regardless of whether OK/NG has
           // been picked yet — same reasoning as Inspection/Action photos:
@@ -7026,9 +7273,16 @@
       const allOk = totalBlocks > 0 && okBlocks === totalBlocks;
       const newStatus = allOk ? 'Verified' : ((selectedClaimData && selectedClaimData.status) || 'QC Investigated');
 
+      // Evidence photos upload to:
+      // https://macoth.sharepoint.com/sites/qcbackupshared/General/Claim_images/6.Verification/
+      // (same "tagged filename routes to the right SharePoint subfolder"
+      // convention as InvestigationImages/ConsiderationImages — see the
+      // SAVE_VERIFICATION_URL comment near the top of this file.)
       const payload = {
         id: selectedClaimId.toString(),
         verificationData: verificationText,
+        verificationAssignees: JSON.stringify(assignees),
+        verificationTimestamps: JSON.stringify(timestamps),
         status: newStatus,
         verificationImagesBase64: verificationImagesBase64
       };
@@ -7041,8 +7295,13 @@
 
       if (selectedClaimData) {
         selectedClaimData.verificationData = verificationText;
+        selectedClaimData.verificationAssignees = payload.verificationAssignees;
+        selectedClaimData.verificationTimestamps = payload.verificationTimestamps;
         if (allOk) selectedClaimData.status = 'Verified';
       }
+      // Clear touchedNow so re-submitting later (e.g. after just changing an
+      // assignment elsewhere) doesn't re-stamp this visit's actions again.
+      Object.keys(verifyState).forEach(k => { if (verifyState[k]) verifyState[k].touchedNow = false; });
 
       statusMsg.textContent = allOk ? '✔ All actions verified — claim marked Verified.' : '✔ Verification saved.';
       alert(allOk ? '✅ All actions verified! Claim marked as Verified.' : '✅ Verification saved.');
