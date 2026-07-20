@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart QC — Login</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800;900&family=Playfair+Display:wght@700;800;900&display=swap" rel="stylesheet">
+  
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            charcoal: '#171717',
+            'charcoal-soft': '#444444',
+            brandred: '#DA0037',
+            'brandred-hover': '#b8002d',
+            ivory: '#EDEDED',
+          },
+          fontFamily: {
+            body: ['"Plus Jakarta Sans"', 'sans-serif'],
+            display: ['"Playfair Display"', 'serif'],
+          },
+          animation: {
+            'liquid-blob': 'blob 10s infinite alternate',
+            'liquid-blob-reverse': 'blob-reverse 12s infinite alternate',
+            'fade-in-up': 'fadeInUp 0.6s ease-out forwards',
+          },
+          keyframes: {
+            blob: {
+              '0%': { transform: 'translate(0px, 0px) scale(1)' },
+              '50%': { transform: 'translate(100px, -50px) scale(1.1)' },
+              '100%': { transform: 'translate(-50px, 20px) scale(0.9)' },
+            },
+            'blob-reverse': {
+              '0%': { transform: 'translate(0px, 0px) scale(1)' },
+              '50%': { transform: 'translate(-80px, 60px) scale(1.2)' },
+              '100%': { transform: 'translate(40px, -40px) scale(0.8)' },
+            },
+            fadeInUp: {
+              '0%': { opacity: '0', transform: 'translateY(20px)' },
+              '100%': { opacity: '1', transform: 'translateY(0)' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Custom styles for Liquid Glass inputs and scrollbar */
+    body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #171717; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
+    
+    .glass-input {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      transition: all 0.3s ease;
+    }
+    .glass-input:focus {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: #DA0037;
+      box-shadow: 0 0 15px rgba(218, 0, 55, 0.3);
+      outline: none;
+    }
+    .glass-input::placeholder { color: rgba(255, 255, 255, 0.3); }
+    
+    .glass-panel {
+      background: rgba(30, 30, 30, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+    }
+  </style>
+</head>
+<body class="relative min-h-screen flex items-center justify-center overflow-hidden text-white selection:bg-brandred selection:text-white">
+
+  <div class="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+    <div class="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-brandred/20 blur-[100px] animate-liquid-blob mix-blend-screen"></div>
+    <div class="absolute bottom-[-10%] right-[-5%] w-[45vw] h-[45vw] rounded-full bg-[#444444]/60 blur-[120px] animate-liquid-blob-reverse mix-blend-screen"></div>
+    <div class="absolute top-[40%] left-[60%] w-[30vw] h-[30vw] rounded-full bg-brandred/10 blur-[80px] animate-liquid-blob mix-blend-screen" style="animation-delay: 2s;"></div>
+    <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAwIDEwIEwgNDAgMTAgTSAxMCAwIEwgMTAgNDAiIGZpbGw9Im5vbmUiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjAyKSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIi8+PC9zdmc+')] opacity-50"></div>
+  </div>
+
+  <div class="relative z-10 w-full max-w-6xl mx-auto flex flex-col md:flex-row min-h-[600px] rounded-3xl overflow-hidden glass-panel shadow-2xl animate-fade-in-up m-6">
+    
+    <div class="md:w-5/12 p-10 md:p-14 flex flex-col justify-between relative overflow-hidden border-b md:border-b-0 md:border-r border-white/10">
+      <div class="absolute -top-32 -left-32 w-64 h-64 rounded-full border border-white/5 pointer-events-none"></div>
+      
+      <div class="relative z-10">
+        <div class="flex items-center gap-3 mb-12 transform hover:scale-105 transition-transform duration-300">
+          <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-brandred to-[#8B0020] flex items-center justify-center shadow-[0_0_20px_rgba(218,0,55,0.4)]">
+            <svg width="26" height="26" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M20 6C12.268 6 6 12.268 6 20C6 27.732 12.268 34 20 34C23.6332 34 26.9423 32.6143 29.5 30.334L34.5 35.334" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M13 20.5L18 25.5L29 13.5" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <span class="font-display text-2xl font-bold tracking-wide text-white">Smart QC</span>
+        </div>
+        
+        <h2 class="font-display text-4xl md:text-5xl font-black leading-tight mb-4 text-transparent bg-clip-text bg-gradient-to-r from-white to-white/60">
+          Quality Control,<br>Elevated.
+        </h2>
+        <p class="text-white/50 text-sm md:text-base leading-relaxed max-w-sm">
+          Track complaints, manage responses, and keep your team aligned seamlessly with intelligent automation.
+        </p>
+      </div>
+
+      <div class="mt-12 md:mt-0 relative z-10">
+        <div class="flex items-center gap-2">
+          <span class="flex h-3 w-3 relative">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brandred opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-3 w-3 bg-brandred"></span>
+          </span>
+          <span class="text-xs font-bold uppercase tracking-widest text-white/40">System Online</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="md:w-7/12 p-10 md:p-14 flex items-center justify-center bg-black/20">
+      <div class="w-full max-w-md">
+        
+        <div id="loginView" class="w-full transition-all duration-500 block">
+          <div class="mb-10">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brandred/10 border border-brandred/20 text-brandred text-xs font-bold uppercase tracking-wider mb-4">
+              Authentication
+            </div>
+            <h1 class="font-display text-3xl font-black text-white mb-2">Welcome back</h1>
+            <p class="text-white/50 text-sm">Sign in to your Smart QC account to continue.</p>
+          </div>
+
+          <form onsubmit="event.preventDefault(); handleLogin();" class="space-y-5">
+            <div>
+              <label class="block text-xs font-bold text-white/60 uppercase tracking-wide mb-2">Company Email</label>
+              <input type="email" id="loginEmail" required placeholder="name@company.com" class="w-full px-4 py-3 rounded-xl text-sm glass-input text-white">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-white/60 uppercase tracking-wide mb-2">Password</label>
+              <input type="password" id="loginPassword" required placeholder="••••••••" class="w-full px-4 py-3 rounded-xl text-sm glass-input text-white">
+            </div>
+
+            <div class="flex items-center gap-2 pt-1">
+              <input type="checkbox" id="rememberMe" class="w-4 h-4 rounded accent-brandred cursor-pointer">
+              <label for="rememberMe" class="text-xs text-white/50 cursor-pointer select-none">Remember my email &amp; password on this device</label>
+            </div>
+
+            <button type="submit" id="loginBtnSubmit" class="w-full mt-4 py-3.5 rounded-xl bg-brandred hover:bg-brandred-hover text-white text-sm font-bold tracking-wide transition-all duration-300 shadow-[0_4px_14px_rgba(218,0,55,0.39)] hover:shadow-[0_6px_20px_rgba(218,0,55,0.6)] hover:-translate-y-0.5 flex items-center justify-center gap-2">
+              Sign In
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </button>
+            
+            <div class="text-center mt-6 text-sm text-white/40">
+              Don't have an account? 
+              <a onclick="toggleView('register')" class="text-brandred font-bold cursor-pointer hover:text-white transition-colors">Register here</a>
+            </div>
+          </form>
+        </div>
+
+        <div id="registerView" class="w-full transition-all duration-500 hidden">
+          <div class="mb-8">
+            <h1 class="font-display text-3xl font-black text-white mb-2">Create account</h1>
+            <p class="text-white/50 text-sm">Fill in your details to join the Smart QC platform.</p>
+          </div>
+
+          <form onsubmit="event.preventDefault(); handleRegister();" class="space-y-4 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-[10px] font-bold text-white/60 uppercase tracking-wide mb-1.5">First Name</label>
+                <input type="text" id="regFirstName" required class="w-full px-3 py-2.5 rounded-lg text-sm glass-input text-white">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-white/60 uppercase tracking-wide mb-1.5">Last Name</label>
+                <input type="text" id="regLastName" required class="w-full px-3 py-2.5 rounded-lg text-sm glass-input text-white">
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-[10px] font-bold text-white/60 uppercase tracking-wide mb-1.5">Employee ID</label>
+              <input type="text" id="regEmpId" required class="w-full px-3 py-2.5 rounded-lg text-sm glass-input text-white">
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-[10px] font-bold text-white/60 uppercase tracking-wide mb-1.5">Section</label>
+                <select id="regSection" required class="w-full px-3 py-2.5 rounded-lg text-sm glass-input text-white appearance-none cursor-pointer">
+                  <option value="" disabled selected class="text-black">Select...</option>
+                  <option value="AS" class="text-black">AS</option><option value="EC" class="text-black">EC</option><option value="HE" class="text-black">HE</option>
+                  <option value="NM" class="text-black">NM</option><option value="PC" class="text-black">PC</option><option value="PL" class="text-black">PL</option>
+                  <option value="PN" class="text-black">PN</option><option value="PP" class="text-black">PP</option><option value="PT" class="text-black">PT</option>
+                  <option value="SM" class="text-black">SM</option><option value="WH" class="text-black">WH</option><option value="SE" class="text-black">SE</option>
+                  <option value="EV" class="text-black">EV</option><option value="IN" class="text-black">IN</option><option value="OC" class="text-black">OC</option>
+                  <option value="TT" class="text-black">TT</option><option value="DD" class="text-black">DD</option><option value="EE" class="text-black">EE</option>
+                  <option value="TA" class="text-black">TA</option><option value="TE" class="text-black">TE</option><option value="BS" class="text-black">BS</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-white/60 uppercase tracking-wide mb-1.5">Position</label>
+                <select id="regPosition" required class="w-full px-3 py-2.5 rounded-lg text-sm glass-input text-white appearance-none cursor-pointer">
+                  <option value="" disabled selected class="text-black">Select…</option>
+                  <option value="DM" class="text-black">DM</option><option value="SR.MGR" class="text-black">SR.MGR</option><option value="MGR" class="text-black">MGR</option>
+                  <option value="SE" class="text-black">SE</option><option value="AM" class="text-black">AM</option><option value="ER" class="text-black">ER</option>
+                  <option value="SV" class="text-black">SV</option><option value="FM" class="text-black">FM</option><option value="SF" class="text-black">SF</option>
+                  <option value="SR.TS" class="text-black">SR.TS</option><option value="SR.TN" class="text-black">SR.TN</option><option value="TS" class="text-black">TS</option>
+                  <option value="TN" class="text-black">TN</option><option value="OS" class="text-black">OS</option><option value="GL" class="text-black">GL</option>
+                  <option value="GW" class="text-black">GW</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-[10px] font-bold text-white/60 uppercase tracking-wide mb-1.5">User Type</label>
+              <select id="regUserType" required class="w-full px-3 py-2.5 rounded-lg text-sm glass-input text-white appearance-none cursor-pointer">
+                <option value="" disabled selected class="text-black">Select type…</option>
+                <option class="text-black">4Dx Mentor</option><option class="text-black">Team Leader</option><option class="text-black">Player</option><option class="text-black">Player-Supporter</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-[10px] font-bold text-white/60 uppercase tracking-wide mb-1.5">Company Email</label>
+              <input type="email" id="regEmail" required class="w-full px-3 py-2.5 rounded-lg text-sm glass-input text-white">
+            </div>
+            
+            <div class="pb-2">
+              <label class="block text-[10px] font-bold text-white/60 uppercase tracking-wide mb-1.5">Password</label>
+              <input type="password" id="regPassword" required class="w-full px-3 py-2.5 rounded-lg text-sm glass-input text-white">
+            </div>
+
+            <button type="submit" id="registerBtn" class="w-full py-3.5 rounded-xl bg-white text-charcoal text-sm font-bold tracking-wide transition-all duration-300 shadow-[0_4px_14px_rgba(255,255,255,0.15)] hover:shadow-[0_6px_20px_rgba(255,255,255,0.3)] hover:-translate-y-0.5">
+              Create Account
+            </button>
+            
+            <div class="text-center mt-4 text-sm text-white/40 pb-4">
+              Already have an account? 
+              <a onclick="toggleView('login')" class="text-white font-bold cursor-pointer hover:text-brandred transition-colors underline decoration-white/20 underline-offset-4">Sign in here</a>
+            </div>
+          </form>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const POWER_AUTOMATE_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/f0cff0aa4ecb4945b5645dceca73435e/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=xPo6GVPi-xKnIAfosoE89oM8Sj6ih5vxz6ngZgB9Gx0";
+    const REFRESH_CLAIMS_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/7d517aeb2883465299e275a3413b7d14/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=PR5zN8ycfRw5O9B74xdQIn1aHyegiI22i5eDA74lWzE";
+    const REMEMBER_LOGIN_KEY = 'qc_rememberedLogin';
+
+    /** Loads users.js fresh (cache-busted) and resolves with USER_DATABASE.
+     *  Shared by handleLogin() (credential check) and handleRegister()
+     *  (duplicate check) so both always see the current file, not a
+     *  browser-cached copy from an earlier page load. */
+    function loadUserDatabase() {
+      return new Promise(function(resolve, reject) {
+        const existing = document.getElementById('usersDbScript');
+        if (existing) existing.remove();
+        const script = document.createElement('script');
+        script.id = 'usersDbScript';
+        script.src = 'users.js?v=' + new Date().getTime();
+        script.onload = function() {
+          if (typeof USER_DATABASE === 'undefined') {
+            reject(new Error('Database format incorrect.'));
+            return;
+          }
+          resolve(USER_DATABASE);
+          document.body.removeChild(script);
+        };
+        script.onerror = function() { reject(new Error('users.js not found.')); };
+        document.body.appendChild(script);
+      });
+    }
+
+    /** Pre-fills the login form from a previously "remembered" login, if any. */
+    function restoreRememberedLogin() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(REMEMBER_LOGIN_KEY) || 'null');
+        if (saved && saved.email) {
+          document.getElementById('loginEmail').value = saved.email;
+          document.getElementById('loginPassword').value = saved.password || '';
+          document.getElementById('rememberMe').checked = true;
+        }
+      } catch (_) { /* ignore malformed/legacy storage */ }
+    }
+    window.addEventListener('DOMContentLoaded', restoreRememberedLogin);
+
+    function toggleView(view) {
+      // Adjusted to manipulate classList for Tailwind's display properties
+      const login = document.getElementById('loginView');
+      const register = document.getElementById('registerView');
+      
+      if (view === 'login') {
+        login.classList.remove('hidden');
+        login.classList.add('block');
+        register.classList.add('hidden');
+        register.classList.remove('block');
+      } else {
+        login.classList.add('hidden');
+        login.classList.remove('block');
+        register.classList.remove('hidden');
+        register.classList.add('block');
+      }
+    }
+
+    async function handleLogin() {
+      const email = document.getElementById('loginEmail').value;
+      const pass  = document.getElementById('loginPassword').value;
+      const btn   = document.getElementById('loginBtnSubmit');
+
+      btn.innerHTML = '🔄 Refreshing data...'; btn.disabled = true;
+
+      if (REFRESH_CLAIMS_URL && !REFRESH_CLAIMS_URL.startsWith('PASTE_')) {
+        try {
+          await fetch(REFRESH_CLAIMS_URL, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ trigger: 'login', timestamp: new Date().toISOString() })
+          });
+          await new Promise(function(resolve) { setTimeout(resolve, 2000); });
+        } catch (e) {
+          await new Promise(function(resolve) { setTimeout(resolve, 2000); });
+        }
+      }
+
+      btn.innerHTML = '🔑 Verifying...'; btn.disabled = true;
+
+      let users;
+      try {
+        users = await loadUserDatabase();
+      } catch (e) {
+        alert('Error: ' + e.message);
+        resetLogin(btn);
+        return;
+      }
+
+      const validUser = users.find(function(u) {
+        return u.email === email && u.password === pass;
+      });
+
+      if (validUser) {
+        // Remember Me — save or clear the credential based on the checkbox,
+        // only on a SUCCESSFUL login (never persist a failed attempt).
+        const rememberChecked = document.getElementById('rememberMe').checked;
+        if (rememberChecked) {
+          localStorage.setItem(REMEMBER_LOGIN_KEY, JSON.stringify({ email: email, password: pass }));
+        } else {
+          localStorage.removeItem(REMEMBER_LOGIN_KEY);
+        }
+
+        localStorage.setItem('userProfile', JSON.stringify(validUser));
+        btn.innerHTML = '✅ Signing in...';
+        window.location.href = 'main.html';
+      } else {
+        alert('Login Failed: Invalid email or password.');
+        resetLogin(btn);
+      }
+    }
+
+    function resetLogin(btn) { 
+      btn.innerHTML = `Sign In <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>`; 
+      btn.disabled = false; 
+    }
+
+    async function handleRegister() {
+      const data = {
+        firstName: document.getElementById('regFirstName').value,
+        lastName:  document.getElementById('regLastName').value,
+        empId:     document.getElementById('regEmpId').value,
+        section:   document.getElementById('regSection').value,
+        position:  document.getElementById('regPosition').value,
+        userType:  document.getElementById('regUserType').value,
+        email:     document.getElementById('regEmail').value,
+        password:  document.getElementById('regPassword').value,
+      };
+      const btn = document.getElementById('registerBtn');
+      btn.textContent = 'Checking for duplicates...'; btn.disabled = true;
+
+      // Duplicate check — block registration if this email OR first name
+      // already exists in users.js (the client-side snapshot of the
+      // Microsoft List). NOTE: this is only as fresh as users.js itself —
+      // if there isn't a flow that regenerates users.js the same way
+      // REFRESH_CLAIMS_URL regenerates claims.js, two people registering
+      // within the same stale window could both slip through.
+      let users;
+      try {
+        users = await loadUserDatabase();
+      } catch (e) {
+        alert('Error checking existing users: ' + e.message + '\nPlease try again.');
+        btn.textContent = 'Create Account'; btn.disabled = false;
+        return;
+      }
+
+      const emailNorm     = (data.email || '').trim().toLowerCase();
+      const firstNameNorm = (data.firstName || '').trim().toLowerCase();
+      const duplicate = users.find(function(u) {
+        return (u.email || '').trim().toLowerCase() === emailNorm ||
+               (u.firstName || '').trim().toLowerCase() === firstNameNorm;
+      });
+
+      if (duplicate) {
+        const isEmailClash = (duplicate.email || '').trim().toLowerCase() === emailNorm;
+        alert('Registration Failed: This ' + (isEmailClash ? 'email address' : 'first name') +
+              ' is already registered.\nPlease sign in instead, or use a different ' +
+              (isEmailClash ? 'email address' : 'first name') + '.');
+        btn.textContent = 'Create Account'; btn.disabled = false;
+        return;
+      }
+
+      btn.textContent = 'Creating...';
+
+      try {
+        localStorage.setItem('userProfile', JSON.stringify(data));
+        await fetch(POWER_AUTOMATE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        alert('Registration Successful!'); window.location.href = 'main.html';
+      } catch (error) {
+        alert('Error connecting to cloud, but profile saved offline.'); window.location.href = 'main.html';
+      } finally {
+        btn.textContent = 'Create Account'; btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
