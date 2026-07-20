@@ -5900,6 +5900,299 @@
     switchTab('tabPlayers', null);
   }
 
+  /* ═══════════════════════════════════════════════════════════════════════
+     ACTIVE CLAIMS QUEUE — column sort + filter
+     Table state is kept separate from the raw data: activeClaimsList always
+     holds the full snapshot from claims.js; claimsSortState/claimsColumnFilters
+     describe how to derive the currently-DISPLAYED rows from it. Every column
+     header gets a ▾ button (added by initClaimsTableHeaderControls) opening an
+     Excel-style menu: Sort Ascending/Descending, plus a checkbox list of the
+     column's unique values to filter by. Default sort is Issue Date descending
+     so the latest claim case always lands on top when the page opens.
+     ═══════════════════════════════════════════════════════════════════════ */
+  const CLAIMS_TABLE_COLUMNS = [
+    { key:'claimNo',      label:'Claim No.' },
+    { key:'subject',      label:'Subject' },
+    { key:'source',       label:'Source' },
+    { key:'typeAir',      label:'Type Air' },
+    { key:'partName',     label:'Part Name' },
+    { key:'partNo',       label:'Part No.' },
+    { key:'issueDate',    label:'Issue Date' },
+    { key:'startDate',    label:'Start Date' },
+    { key:'closeDate',    label:'Close Date' },
+    { key:'responseTime', label:'Response Time' },
+    { key:'shop',         label:'Shop' },
+    { key:'status',       label:'Status' },
+  ];
+  let claimsSortState = { key: 'issueDate', dir: 'desc' }; // latest claim case on top by default
+  let claimsColumnFilters = {}; // colKey -> Set of allowed display values (absent = no filter)
+  let claimsOpenMenuKey = null;
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  }
+
+  /* Computes every display + sortable/filterable value for one claim row once,
+     so rendering, sorting and filtering all read from the same source of truth
+     instead of re-deriving status/shop/response-time logic three different ways. */
+  function getClaimRowModel(claim, i){
+    const runNo = claim.index_running_no || claim.IndexRunningNo || claim.index || claim.Index || (i+1);
+    const issueDateRaw = resolveField(claim,['issueDate','IssueDate'],'');
+    const cNo = buildClaimNo(runNo, issueDateRaw);
+
+    const rawStatusRaw = claim.status ?? claim.Status ?? claim.ClaimStatus ?? claim.Claim_Status ?? null;
+    const rawStatus = rawStatusRaw === null ? ''
+      : (typeof rawStatusRaw === 'object' && rawStatusRaw !== null)
+        ? (rawStatusRaw.Value || rawStatusRaw.value || '')
+        : String(rawStatusRaw).trim();
+    var statusLabel='NEW', statusClass='status-new';
+    if      (rawStatus==='Investigating')    {statusLabel='INVESTIGATING'; statusClass='status-investigating';}
+    else if (rawStatus==='Finding Risk')     {statusLabel='FINDING RISK';  statusClass='status-finding';}
+    else if (rawStatus==='Inspectioning')    {statusLabel='INSPECTING';    statusClass='status-inspecting';}
+    else if (rawStatus==='Trouble Analyzing'){statusLabel='ANALYZING';     statusClass='status-analyzing';}
+    else if (rawStatus==='Meeting With Shop'){statusLabel='MEETING';       statusClass='status-meeting';}
+    else if (rawStatus==='QC Investigated')  {statusLabel='INVESTIGATED';  statusClass='status-done';}
+    else if (rawStatus.includes('Step 2') || rawStatus.includes('Investigated')) {statusLabel='INVESTIGATING'; statusClass='status-investigating';}
+    else if (rawStatus !== '')               {statusLabel=rawStatus.toUpperCase(); statusClass='status-new';}
+
+    var shopVal='—';
+    var _shopRaw = claim.shopConcerned || claim.ShopConcerned || claim.ClaimShop || claim.claimShop || '';
+    try {
+      var sc = JSON.parse(_shopRaw);
+      if (Array.isArray(sc) && sc.length > 0) shopVal = sc.join(', ');
+      else if (typeof sc === 'string' && sc.trim()) shopVal = sc.trim();
+    } catch(_) {
+      if (_shopRaw && _shopRaw.trim()) shopVal = _shopRaw.trim();
+    }
+
+    const _takeTimeRaw = claim.claimTakeTime ?? claim.ClaimTakeTime;
+    const responseTimeRaw = (_takeTimeRaw !== undefined && _takeTimeRaw !== null && _takeTimeRaw !== '') ? Number(_takeTimeRaw) : null;
+    const responseTimeDisplay = (responseTimeRaw !== null && !isNaN(responseTimeRaw)) ? `${responseTimeRaw} WD` : '—';
+
+    const startDateRaw = claim.StartDate || claim.startDate || '';
+    const closeDateRaw = claim.CloseDate || claim.closeDate || '';
+
+    return {
+      claim, runNo,
+      claimNo: cNo,
+      subject: resolveField(claim,['Subject','subject'],'N/A'),
+      source: resolveField(claim,['source','Source'],'N/A'),
+      typeAir: resolveField(claim,['typeAir','TypeAir'],'—'),
+      partName: resolveField(claim,['part','Part','partName'],'N/A'),
+      partNo: resolveField(claim,['partNo','PartNo'],'—'),
+      issueDateRaw, issueDateDisplay: formatDateDisplay(issueDateRaw),
+      startDateRaw, startDateDisplay: startDateRaw ? formatDateDisplay(startDateRaw) : '—',
+      closeDateRaw, closeDateDisplay: closeDateRaw ? formatDateDisplay(closeDateRaw) : '—',
+      responseTimeRaw, responseTimeDisplay,
+      shop: shopVal,
+      statusLabel, statusClass,
+    };
+  }
+
+  function claimsSortValue(r, key){
+    switch(key){
+      case 'claimNo':      return r.runNo;
+      case 'issueDate':    return r.issueDateRaw ? new Date(r.issueDateRaw).getTime() : null;
+      case 'startDate':    return r.startDateRaw ? new Date(r.startDateRaw).getTime() : null;
+      case 'closeDate':    return r.closeDateRaw ? new Date(r.closeDateRaw).getTime() : null;
+      case 'responseTime': return r.responseTimeRaw;
+      case 'status':       return r.statusLabel;
+      default:             return r[key];
+    }
+  }
+
+  function claimsFilterValue(r, key){
+    switch(key){
+      case 'issueDate':    return r.issueDateDisplay;
+      case 'startDate':    return r.startDateDisplay;
+      case 'closeDate':    return r.closeDateDisplay;
+      case 'responseTime': return r.responseTimeDisplay;
+      case 'status':       return r.statusLabel;
+      default:             return r[key];
+    }
+  }
+
+  /* Re-derives the visible rows from activeClaimsList using the current
+     sort/filter state and repaints <tbody>. Call this (not raw DOM edits)
+     any time the underlying data OR the sort/filter state changes. */
+  function renderClaimsTable(){
+    const tbody = document.getElementById('claimsTableBody');
+    if (!activeClaimsList || !activeClaimsList.length){
+      tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:30px;color:var(--charcoal-soft);">No claims found.</td></tr>';
+      return;
+    }
+
+    let rows = activeClaimsList.map((claim,i)=>getClaimRowModel(claim,i));
+
+    Object.keys(claimsColumnFilters).forEach(key=>{
+      const allowed = claimsColumnFilters[key];
+      if (!allowed) return;
+      rows = rows.filter(r => allowed.has(claimsFilterValue(r,key)));
+    });
+
+    const { key: sortKey, dir } = claimsSortState;
+    if (sortKey){
+      rows = rows.slice().sort((a,b)=>{
+        const av = claimsSortValue(a, sortKey), bv = claimsSortValue(b, sortKey);
+        const aEmpty = av===null || av===undefined || av==='';
+        const bEmpty = bv===null || bv===undefined || bv==='';
+        let cmp;
+        if (aEmpty && bEmpty) cmp = 0;
+        else if (aEmpty) cmp = 1;
+        else if (bEmpty) cmp = -1;
+        else if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+        else cmp = String(av).localeCompare(String(bv));
+        return dir === 'asc' ? cmp : -cmp;
+      });
+    }
+
+    if (!rows.length){
+      tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:30px;color:var(--charcoal-soft);">No claims match the current filters.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML='';
+    rows.forEach(r=>{
+      const tr=document.createElement('tr');
+      tr.style.cursor='pointer';
+      tr.onclick=function() {
+        const claim = r.claim;
+        // Merge any in-memory status updates into the claim object before opening
+        // This ensures alreadyStarted check works even before claims.js refreshes
+        if (selectedClaimData && String(selectedClaimData.id||selectedClaimData.ID) === String(claim.id||claim.ID)) {
+          if (selectedClaimData.status) claim.status = selectedClaimData.status;
+          if (selectedClaimData._playerSlots) claim._playerSlots = selectedClaimData._playerSlots;
+          if (selectedClaimData._photos) claim._photos = selectedClaimData._photos;
+        }
+        openInvestigationWorkspace(claim);
+      };
+      tr.innerHTML=`
+        <td style="font-weight:800;color:var(--red);white-space:nowrap;font-size:12px;">${r.claimNo}</td>
+        <td style="font-weight:700;">${r.subject}</td>
+        <td>${r.source}</td>
+        <td>${r.typeAir}</td>
+        <td>${r.partName}</td>
+        <td>${r.partNo}</td>
+        <td style="font-size:11px;white-space:nowrap;">${r.issueDateDisplay}</td>
+        <td style="font-size:11px;white-space:nowrap;">${r.startDateRaw?r.startDateDisplay:'<span style="color:var(--charcoal-soft);font-size:10px;">—</span>'}</td>
+        <td style="font-size:11px;white-space:nowrap;">${r.closeDateRaw?r.closeDateDisplay:'<span style="color:var(--charcoal-soft);font-size:10px;">—</span>'}</td>
+        <td style="font-size:11px;white-space:nowrap;font-weight:700;">${r.responseTimeRaw!==null?r.responseTimeDisplay:'<span style="color:var(--charcoal-soft);font-size:10px;">—</span>'}</td>
+        <td style="font-size:11px;">${r.shop}</td>
+        <td><span class="status-badge ${r.statusClass}">${r.statusLabel}</span></td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    updateClaimsHeaderIndicators();
+  }
+
+  /* Adds a ▾ menu button to each <th> once. Idempotent (guarded by a data
+     attribute) so it's safe to call from fetchClaims() on every refresh. */
+  function initClaimsTableHeaderControls(){
+    const headRow = document.querySelector('#pagComplaints .data-table thead tr');
+    if (!headRow || headRow.dataset.controlsInit) return;
+    headRow.dataset.controlsInit = '1';
+    headRow.querySelectorAll('th').forEach((th, idx) => {
+      const col = CLAIMS_TABLE_COLUMNS[idx];
+      if (!col) return;
+      th.classList.add('sortable-th');
+      const label = th.textContent.trim();
+      th.innerHTML = `<span class="th-label">${label}</span><button type="button" class="th-menu-btn" data-col="${col.key}" title="Sort / filter">▾</button>`;
+      th.querySelector('.th-menu-btn').addEventListener('click', (e)=>{
+        e.stopPropagation();
+        toggleClaimsColumnMenu(col.key, th);
+      });
+    });
+    document.addEventListener('click', closeClaimsColumnMenu);
+  }
+
+  function updateClaimsHeaderIndicators(){
+    document.querySelectorAll('#pagComplaints .data-table thead th.sortable-th').forEach(th=>{
+      const key = th.querySelector('.th-menu-btn')?.dataset.col;
+      th.classList.toggle('th-sort-asc', claimsSortState.key===key && claimsSortState.dir==='asc');
+      th.classList.toggle('th-sort-desc', claimsSortState.key===key && claimsSortState.dir==='desc');
+      th.classList.toggle('th-filtered', !!claimsColumnFilters[key]);
+    });
+  }
+
+  function closeClaimsColumnMenu(){
+    document.querySelectorAll('.th-filter-menu').forEach(m=>m.remove());
+    document.querySelectorAll('.sortable-th.th-menu-open').forEach(th=>th.classList.remove('th-menu-open'));
+    claimsOpenMenuKey = null;
+  }
+
+  function toggleClaimsColumnMenu(key, th){
+    const wasOpen = claimsOpenMenuKey === key;
+    closeClaimsColumnMenu();
+    if (wasOpen) return;
+    claimsOpenMenuKey = key;
+    th.classList.add('th-menu-open');
+
+    const rows = (activeClaimsList||[]).map((c,i)=>getClaimRowModel(c,i));
+    const values = Array.from(new Set(rows.map(r=>claimsFilterValue(r,key)).filter(v=>v!==undefined && v!==null && v!=='')))
+      .sort((a,b)=>String(a).localeCompare(String(b)));
+    const selected = claimsColumnFilters[key]; // undefined = all selected
+
+    const menu = document.createElement('div');
+    menu.className = 'th-filter-menu';
+    menu.addEventListener('click', e=>e.stopPropagation());
+    menu.innerHTML = `
+      <div class="th-filter-sort">
+        <button type="button" data-action="sort-asc">↑ Sort Ascending</button>
+        <button type="button" data-action="sort-desc">↓ Sort Descending</button>
+      </div>
+      <div class="th-filter-search"><input type="text" class="form-control" placeholder="Search…"></div>
+      <div class="th-filter-list">
+        ${values.map(v=>`<label class="th-filter-opt"><input type="checkbox" value="${escapeHtml(v)}" ${(!selected || selected.has(v))?'checked':''}><span>${escapeHtml(v)}</span></label>`).join('') || '<div class="th-filter-empty">No values</div>'}
+      </div>
+      <div class="th-filter-actions">
+        <button type="button" data-action="select-all">Select All</button>
+        <button type="button" data-action="clear">Clear</button>
+        <button type="button" data-action="apply" class="th-filter-apply">Apply</button>
+      </div>`;
+    // Appended to <body> and positioned `fixed` (not nested inside the th) so it
+    // can't be clipped by .claims-table-wrap's overflow:auto scroll container.
+    document.body.appendChild(menu);
+    const btnRect = th.querySelector('.th-menu-btn').getBoundingClientRect();
+    const menuWidth = 220;
+    let left = btnRect.right - menuWidth;
+    left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8));
+    menu.style.position = 'fixed';
+    menu.style.top = `${btnRect.bottom + 4}px`;
+    menu.style.left = `${left}px`;
+    menu.style.marginTop = '0';
+
+    menu.querySelector('[data-action="sort-asc"]').onclick = ()=>{ claimsSortState={key,dir:'asc'}; renderClaimsTable(); closeClaimsColumnMenu(); };
+    menu.querySelector('[data-action="sort-desc"]').onclick = ()=>{ claimsSortState={key,dir:'desc'}; renderClaimsTable(); closeClaimsColumnMenu(); };
+    menu.querySelector('[data-action="select-all"]').onclick = ()=>{ menu.querySelectorAll('.th-filter-opt input').forEach(cb=>cb.checked=true); };
+    menu.querySelector('[data-action="clear"]').onclick = ()=>{ menu.querySelectorAll('.th-filter-opt input').forEach(cb=>cb.checked=false); };
+    const searchInput = menu.querySelector('.th-filter-search input');
+    if (searchInput) searchInput.addEventListener('input', (e)=>{
+      const q = e.target.value.toLowerCase();
+      menu.querySelectorAll('.th-filter-opt').forEach(opt=>{
+        opt.style.display = opt.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    });
+    menu.querySelector('[data-action="apply"]').onclick = ()=>{
+      const checked = Array.from(menu.querySelectorAll('.th-filter-opt input:checked')).map(cb=>cb.value);
+      if (checked.length === values.length) delete claimsColumnFilters[key]; // everything selected = no filter
+      else claimsColumnFilters[key] = new Set(checked); // may be an empty Set — that's a valid "show none" filter
+      renderClaimsTable();
+      closeClaimsColumnMenu();
+    };
+
+    // Close the menu if the table is scrolled afterward (it's position:fixed,
+    // so it can't track a scrolled table on its own). Armed one frame later —
+    // not immediately — because opening the menu can itself trigger a
+    // scroll-into-view (e.g. the button gaining focus near the sticky header
+    // edge), which would otherwise close the menu the instant it opens.
+    requestAnimationFrame(() => {
+      if (claimsOpenMenuKey !== key) return; // already closed/replaced by then
+      const wrap = document.querySelector('#pagComplaints .claims-table-wrap');
+      if (wrap) wrap.addEventListener('scroll', closeClaimsColumnMenu, { once: true });
+    });
+  }
+
   /* ── FETCH CLAIMS ── */
   /* ── FETCH CLAIMS ──────────────────────────────────────────────────────
      IMPORTANT: claims.js declares `const ACTIVE_CLAIMS_DATABASE = [...]`.
@@ -5945,6 +6238,8 @@
       await new Promise(resolve => setTimeout(resolve, 2000)); // give PAD Desktop time to finish writing claims.js
     }
 
+    initClaimsTableHeaderControls();
+
     loadDataScript('claims.js', ['ACTIVE_CLAIMS_DATABASE']).then((result) => {
       if (!Array.isArray(result.ACTIVE_CLAIMS_DATABASE)) throw new Error('ACTIVE_CLAIMS_DATABASE not found in claims.js');
       const data = result.ACTIVE_CLAIMS_DATABASE;
@@ -5954,82 +6249,7 @@
       // Graph). Plain assignment (not a fresh const/let) is safe to repeat.
       window.ACTIVE_CLAIMS_DATABASE = data;
       activeClaimsList = data;
-      tbody.innerHTML='';
-      if(!activeClaimsList.length){tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:30px;">No claims found.</td></tr>';return;}
-      activeClaimsList.forEach((claim,i)=>{
-        const tr=document.createElement('tr');
-        tr.style.cursor='pointer';
-        tr.onclick=function() {
-          // Merge any in-memory status updates into the claim object before opening
-          // This ensures alreadyStarted check works even before claims.js refreshes
-          if (selectedClaimData && String(selectedClaimData.id||selectedClaimData.ID) === String(claim.id||claim.ID)) {
-            if (selectedClaimData.status) claim.status = selectedClaimData.status;
-            if (selectedClaimData._playerSlots) claim._playerSlots = selectedClaimData._playerSlots;
-            if (selectedClaimData._photos) claim._photos = selectedClaimData._photos;
-          }
-          openInvestigationWorkspace(claim);
-        };
-        const sv=(claim.status!==null&&typeof claim.status==='object')?(claim.status.Value||''):(claim.status||'');
-        const bdg=sv===''||sv==='New'||sv.toLowerCase().includes('step 1')?'status-active':sv.toLowerCase().includes('step 2')||sv.toLowerCase().includes('investigated')?'status-investigated':'';
-        const runNo = claim.index_running_no || claim.IndexRunningNo || claim.index || claim.Index || (i+1);
-        const cNo=buildClaimNo(runNo, resolveField(claim,['issueDate','IssueDate'],''));
-        // ⑧ Status label
-        // ⑧ Status label — handle null, string, and SharePoint Choice object {Value:...}
-        const rawStatusRaw = claim.status ?? claim.Status ?? claim.ClaimStatus ?? claim.Claim_Status ?? null;
-        const rawStatus = rawStatusRaw === null ? ''
-          : (typeof rawStatusRaw === 'object' && rawStatusRaw !== null)
-            ? (rawStatusRaw.Value || rawStatusRaw.value || '')
-            : String(rawStatusRaw).trim();
-        var statusLabel='NEW', statusClass='status-new';
-        if      (rawStatus==='Investigating')    {statusLabel='INVESTIGATING'; statusClass='status-investigating';}
-        else if (rawStatus==='Finding Risk')     {statusLabel='FINDING RISK';  statusClass='status-finding';}
-        else if (rawStatus==='Inspectioning')    {statusLabel='INSPECTING';    statusClass='status-inspecting';}
-        else if (rawStatus==='Trouble Analyzing'){statusLabel='ANALYZING';     statusClass='status-analyzing';}
-        else if (rawStatus==='Meeting With Shop'){statusLabel='MEETING';       statusClass='status-meeting';}
-        else if (rawStatus==='QC Investigated')  {statusLabel='INVESTIGATED';  statusClass='status-done';}
-        else if (rawStatus.includes('Step 2') || rawStatus.includes('Investigated')) {statusLabel='INVESTIGATING'; statusClass='status-investigating';}
-        else if (rawStatus !== '')               {statusLabel=rawStatus.toUpperCase(); statusClass='status-new';}
-        // ① Shop Concerned
-        var shopVal='—';
-        // ① Try shopConcerned / ShopConcerned / ClaimShop — PAD Desktop may write any of these
-        var _shopRaw = claim.shopConcerned || claim.ShopConcerned || claim.ClaimShop || claim.claimShop || '';
-        try {
-          var sc = JSON.parse(_shopRaw);
-          if (Array.isArray(sc) && sc.length > 0) shopVal = sc.join(', ');
-          else if (typeof sc === 'string' && sc.trim()) shopVal = sc.trim();
-        } catch(_) {
-          if (_shopRaw && _shopRaw.trim()) shopVal = _shopRaw.trim();
-        }
-
-        // Response Time — formatted as "N WD" from ClaimTakeTime (claimTakeTime / ClaimTakeTime)
-        const _takeTimeRaw = claim.claimTakeTime ?? claim.ClaimTakeTime;
-        const _takeTimeNum = (_takeTimeRaw !== undefined && _takeTimeRaw !== null && _takeTimeRaw !== '') ? Number(_takeTimeRaw) : null;
-        const responseTimeHtml = (_takeTimeNum !== null && !isNaN(_takeTimeNum))
-          ? `${_takeTimeNum} WD`
-          : '<span style="color:var(--charcoal-soft);font-size:10px;">—</span>';
-
-        // Close Date — from CloseDate / closeDate column, blank until the claim is actually closed
-        const _closeDateRaw = claim.CloseDate || claim.closeDate;
-        const closeDateHtml = _closeDateRaw
-          ? formatDateDisplay(_closeDateRaw)
-          : '<span style="color:var(--charcoal-soft);font-size:10px;">—</span>';
-
-        tr.innerHTML=`
-          <td style="font-weight:800;color:var(--red);white-space:nowrap;font-size:12px;">${cNo}</td>
-          <td style="font-weight:700;">${resolveField(claim,['Subject','subject'],'N/A')}</td>
-          <td>${resolveField(claim,['source','Source'],'N/A')}</td>
-          <td>${resolveField(claim,['typeAir','TypeAir'],'—')}</td>
-          <td>${resolveField(claim,['part','Part','partName'],'N/A')}</td>
-          <td>${resolveField(claim,['partNo','PartNo'],'—')}</td>
-          <td style="font-size:11px;white-space:nowrap;">${formatDateDisplay(resolveField(claim,['issueDate','IssueDate'],''))}</td>
-          <td style="font-size:11px;white-space:nowrap;">${(claim.StartDate||claim.startDate)?formatDateDisplay(claim.StartDate||claim.startDate):'<span style="color:var(--charcoal-soft);font-size:10px;">—</span>'}</td>
-          <td style="font-size:11px;white-space:nowrap;">${closeDateHtml}</td>
-          <td style="font-size:11px;white-space:nowrap;font-weight:700;">${responseTimeHtml}</td>
-          <td style="font-size:11px;">${shopVal}</td>
-          <td><span class="status-badge ${statusClass}">${statusLabel}</span></td>
-        `;
-        tbody.appendChild(tr);
-      });
+      renderClaimsTable();
     }).catch((e) => {
       console.error('[fetchClaims] Failed to load claims.js:', e);
       tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:30px;color:red;">Error loading claims.js</td></tr>';
