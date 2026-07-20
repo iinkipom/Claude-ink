@@ -1209,34 +1209,42 @@
   const SAVE_CLOSE_CLAIM_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/f5e1f850c4b04190ac04690ff58bbba1/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=QhW_zhSs8UQBWsO37qlceoGghYA8c4zvrYPKZwk8rYc";
 
   // ── VERIFY CLAIM URL ─────────────────────────────────────────────────────
-  // Fired from the "Verify Claim" page in two situations:
-  //   (a) a Team Leader assigns a verify person to one action (tabSave:
-  //       'assignVerifier' — only verificationAssignees is meaningful)
-  //   (b) the assigned verify person (or the Team Leader) submits evidence
-  //       + OK/NG for one or more actions
-  // Should:
-  //   1. Write verificationData (text, same "[Corrective N] OK/NG: reason"
-  //      format as actionPlan) into a VerificationData column
-  //   2. Write verificationAssignees (JSON: {"Corrective_1":{empId,
-  //      firstName,lastName}, ...} — who is responsible for verifying each
-  //      action, picked from that claim's confirmed Investigation players)
-  //      into a VerificationAssignees column
-  //   3. Write verificationTimestamps (JSON: {"Corrective_1":"<ISO date>",
-  //      ...} — when the assigned person actually submitted THAT action's
-  //      verification) into a VerificationTimestamps column. This is what
-  //      Evaluate subject 5 (evalNotifySpeed) reads back for a Player's
-  //      score — see computeNotifyShopScore()'s Player branch.
-  //   4. Upload each attached evidence photo to SharePoint at:
-  //      https://macoth.sharepoint.com/sites/qcbackupshared/General/Claim_images/6.Verification/
-  //      and write the resulting links into a VerificationImages column
-  //      (JSON array of URLs), same pattern as InvestigationImages/
-  //      ConsiderationImages — each filename is pre-tagged client-side as
-  //      "VerifyCorrectiveN_..." / "VerifyPreventiveN_..." so it can be
-  //      routed back to the right action on reopen.
-  //   5. If every action was marked OK, the status field will be "Verified"
-  //      (client already computes this — just write it through as usual)
-  // Payload sent: { id, verificationData, verificationAssignees,
-  //                 verificationTimestamps, status, verificationImagesBase64[] }
+  // Fired from the "Verify Claim" page in THREE distinct shapes — deliberately
+  // kept separate rather than one big bundled call, so the flow can branch
+  // cleanly and no request ever mixes text/JSON fields with photo bytes:
+  //
+  //   (a) tabSave:'assignVerifier' — Team Leader assigns a verify person.
+  //       Only { id, verificationAssignees, tabSave } is sent.
+  //   (b) (no tabSave) — submitting OK/NG results. Sends
+  //       { id, verificationData, verificationAssignees,
+  //         verificationTimestamps, status } — TEXT/JSON ONLY, NO PHOTOS.
+  //         1. Write verificationData (text, same "[Corrective N] OK/NG:
+  //            reason" format as actionPlan) into a VerificationData column
+  //         2. Write verificationAssignees (JSON: {"Corrective_1":{empId,
+  //            firstName,lastName}, ...}) into a VerificationAssignees column
+  //         3. Write verificationTimestamps (JSON: {"Corrective_1":"<ISO
+  //            date>", ...} — when that action was actually verified) into
+  //            a VerificationTimestamps column. This is what Evaluate
+  //            subject 5 (evalNotifySpeed) reads back for a Player's score
+  //            — see computeNotifyShopScore()'s Player branch.
+  //         4. If every action was marked OK, status will be "Verified"
+  //            (client already computes this — just write it through)
+  //   (c) tabSave:'evidencePhoto' — fired ONCE PER PHOTO, immediately after
+  //       (b). Sends { id, tabSave, photo:{name, content} } — exactly one
+  //       base64 image per call, never a bundled array. Upload THAT one
+  //       file to SharePoint at:
+  //       https://macoth.sharepoint.com/sites/qcbackupshared/General/Claim_images/6.Verification/
+  //       then APPEND the resulting link to the VerificationImages column
+  //       (JSON array of URLs) — do not replace it, and do not write the
+  //       base64 `content` itself into any column. photo.name is pre-tagged
+  //       "VerifyCorrectiveN_..." / "VerifyPreventiveN_..." so it can be
+  //       routed back to the right action on reopen.
+  //
+  // IMPORTANT: never map an incoming request body directly onto a list
+  // column (e.g. "just JSON-stringify the whole payload into a text field
+  // for now") — a photo's base64 `content` landing in ANY column claims.js
+  // reads from will get baked into claims.js on every regeneration and
+  // balloon that file. Only ever write back a SharePoint URL, never base64.
   // PASTE YOUR "SmartQC - VerifyClaim" PAD/Power Automate HTTP TRIGGER URL
   // BELOW — this is currently a placeholder, so submitVerification() will
   // save locally (selectedClaimData) and no-op the network call until you
@@ -7265,7 +7273,6 @@
         return;
       }
 
-      const verificationImagesBase64 = verifyImgs.map(obj => ({ name: obj.name, content: obj.dataUrl.split(',')[1] }));
       const verificationText = vData.join('\n\n');
       // Only advance to "Verified" once EVERY action on the claim has been
       // marked OK — a single NG (or anything still undecided) keeps the
@@ -7273,24 +7280,39 @@
       const allOk = totalBlocks > 0 && okBlocks === totalBlocks;
       const newStatus = allOk ? 'Verified' : ((selectedClaimData && selectedClaimData.status) || 'QC Investigated');
 
-      // Evidence photos upload to:
+      // ── Text/JSON fields go in ONE small request — never bundled with
+      // photo bytes. A flow that (mis)maps its whole incoming body onto a
+      // list column would otherwise bake base64 image data straight into
+      // VerificationData/VerificationAssignees, which then gets dumped
+      // into claims.js on every regeneration and balloons that file. Each
+      // photo instead goes out in ITS OWN request below (tabSave:
+      // 'evidencePhoto', one {name, content} at a time) — build a
+      // SEPARATE flow branch for that action: upload the single file to
       // https://macoth.sharepoint.com/sites/qcbackupshared/General/Claim_images/6.Verification/
-      // (same "tagged filename routes to the right SharePoint subfolder"
-      // convention as InvestigationImages/ConsiderationImages — see the
-      // SAVE_VERIFICATION_URL comment near the top of this file.)
+      // and append the resulting link to VerificationImages; never write
+      // raw base64 into any list column.
       const payload = {
         id: selectedClaimId.toString(),
         verificationData: verificationText,
         verificationAssignees: JSON.stringify(assignees),
         verificationTimestamps: JSON.stringify(timestamps),
-        status: newStatus,
-        verificationImagesBase64: verificationImagesBase64
+        status: newStatus
       };
 
       if (SAVE_VERIFICATION_URL && !SAVE_VERIFICATION_URL.startsWith('PASTE_')) {
         await fetch(SAVE_VERIFICATION_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        // One request per evidence photo — see the comment above for why
+        // these are kept out of the payload above entirely.
+        for (const img of verifyImgs) {
+          try {
+            await fetch(SAVE_VERIFICATION_URL, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: selectedClaimId.toString(), tabSave: 'evidencePhoto', photo: { name: img.name, content: img.dataUrl.split(',')[1] } })
+            });
+          } catch (e) { console.log('submitVerification photo upload (CORS suppressed):', img.name, e); }
+        }
       } else {
-        console.log('[submitVerification] SAVE_VERIFICATION_URL is still a placeholder — saved locally only:', payload);
+        console.log('[submitVerification] SAVE_VERIFICATION_URL is still a placeholder — saved locally only:', payload, 'photos:', verifyImgs.map(i => i.name));
       }
 
       if (selectedClaimData) {
