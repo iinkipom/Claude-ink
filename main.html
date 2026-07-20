@@ -3204,10 +3204,16 @@
     if (saveBtn) { saveBtn.innerText = '💾 Sending...'; saveBtn.disabled = true; }
 
     try {
-      // Collect action plan text + consideration images
+      // Collect action plan text + consideration images.
+      // Uses _resolveExistingPhotosForSave() (async) rather than reading
+      // investigationImageStore directly — a block whose photo was restored
+      // from a saved claim's SharePoint/OneDrive URL (never re-attached
+      // this session) has no investigationImageStore entry, so reading the
+      // store directly would drop that photo from this save even though
+      // nothing about it changed.
       let aData = []; let considImgs = [];
 
-      document.querySelectorAll('#correctiveWrap .action-block').forEach((b, i) => {
+      for (const [i, b] of Array.from(document.querySelectorAll('#correctiveWrap .action-block')).entries()) {
         const t   = b.querySelector('.act-text')?.value;
         const eff = b.querySelector('.act-eff')?.value;
         const due = b.querySelector('.act-due')?.value;
@@ -3216,18 +3222,19 @@
         const fileInput  = b.querySelector('.action-img-input');
         const previewDiv = fileInput?.nextElementSibling;
         const storeKey   = previewDiv?.id;
-        if (fileInput?.files.length > 0)
+        if (fileInput?.files.length > 0) {
           Array.from(fileInput.files).forEach(f => {
             considImgs.push({ ref: `[Corrective ${i+1}]`, file: f, taggedName: `ActCorrective${i+1}_${f.name}`, dataUrl: null });
           });
-        else if (storeKey && investigationImageStore[storeKey])
-          investigationImageStore[storeKey].forEach(e => {
-            const taggedName = e.name.startsWith('ActCorrective') ? e.name : `ActCorrective${i+1}_${e.name}`;
+        } else if (storeKey) {
+          (await _resolveExistingPhotosForSave(storeKey)).forEach(e => {
+            const taggedName = e.name && e.name.startsWith('ActCorrective') ? e.name : `ActCorrective${i+1}_${e.name||'image.jpg'}`;
             considImgs.push({ ref: `[Corrective ${i+1}]`, file: null, dataUrl: e.dataUrl, taggedName, name: taggedName });
           });
-      });
+        }
+      }
 
-      document.querySelectorAll('#preventiveWrap .action-block').forEach((b, i) => {
+      for (const [i, b] of Array.from(document.querySelectorAll('#preventiveWrap .action-block')).entries()) {
         const t   = b.querySelector('.act-text')?.value;
         const eff = b.querySelector('.act-eff')?.value;
         const due = b.querySelector('.act-due')?.value;
@@ -3236,16 +3243,17 @@
         const fileInput  = b.querySelector('.action-img-input');
         const previewDiv = fileInput?.nextElementSibling;
         const storeKey   = previewDiv?.id;
-        if (fileInput?.files.length > 0)
+        if (fileInput?.files.length > 0) {
           Array.from(fileInput.files).forEach(f => {
             considImgs.push({ ref: `[Preventive ${i+1}]`, file: f, taggedName: `ActPreventive${i+1}_${f.name}`, dataUrl: null });
           });
-        else if (storeKey && investigationImageStore[storeKey])
-          investigationImageStore[storeKey].forEach(e => {
-            const taggedName = e.name.startsWith('ActPreventive') ? e.name : `ActPreventive${i+1}_${e.name}`;
+        } else if (storeKey) {
+          (await _resolveExistingPhotosForSave(storeKey)).forEach(e => {
+            const taggedName = e.name && e.name.startsWith('ActPreventive') ? e.name : `ActPreventive${i+1}_${e.name||'image.jpg'}`;
             considImgs.push({ ref: `[Preventive ${i+1}]`, file: null, dataUrl: e.dataUrl, taggedName, name: taggedName });
           });
-      });
+        }
+      }
 
       // Encode consideration images to base64
       const considerationImagesBase64 = await Promise.all(considImgs.map(obj => {
@@ -3317,6 +3325,47 @@
     if (claimMonitorPane) claimMonitorPane.style.display = (tabId === 'tabEvaluate') ? 'none' : '';
 
     if (tabId === 'tabEvaluate') renderEvaluateTab();
+  }
+
+  /** Resolves the CURRENT photo(s) for one preview container into
+   *  {name, dataUrl} entries ready to include in a save payload.
+   *  Prefers investigationImageStore (this session's own uploads/attaches),
+   *  then falls back to whatever <img> elements are actually showing in the
+   *  container — which covers a block whose photo(s) came from reopening a
+   *  saved claim (restorePreviewsFromUrls, SharePoint/OneDrive URLs) and
+   *  were never re-attached this session, so investigationImageStore has no
+   *  entry for that block at all. A data: URL is used as-is; a remote
+   *  http(s) URL is re-fetched and re-encoded to base64 so it round-trips
+   *  through the save payload exactly like a fresh upload — WITHOUT this,
+   *  a block whose only photo came from a URL restore would silently drop
+   *  out of every subsequent save (the reported "photos disappear after
+   *  attaching more elsewhere and submitting" bug). */
+  async function _resolveExistingPhotosForSave(containerId) {
+    const stored = investigationImageStore[containerId];
+    if (stored && stored.length) return stored;
+
+    const container = document.getElementById(containerId);
+    if (!container) return [];
+    const out = [];
+    for (const img of Array.from(container.querySelectorAll('img'))) {
+      const src = img.src;
+      if (!src) continue;
+      if (src.startsWith('data:')) { out.push({ name: img.title || 'image.jpg', dataUrl: src }); continue; }
+      try {
+        const resp = await fetch(src);
+        const blob = await resp.blob();
+        const dataUrl = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result);
+          r.onerror = reject;
+          r.readAsDataURL(blob);
+        });
+        out.push({ name: img.title || 'image.jpg', dataUrl });
+      } catch (e) {
+        console.warn('[_resolveExistingPhotosForSave] could not re-fetch existing photo, it will be missing from this save:', src, e);
+      }
+    }
+    return out;
   }
 
   // Render previews, persist to investigationImageStore AND to selectedClaimData._photos
@@ -5777,9 +5826,14 @@
   }
 
   /* ── ACTION BLOCKS (Corrective / Preventive — unlimited, with Due Date) ── */
-  function addActionBlock(containerId, type) {
+  function addActionBlock(containerId, type, forceCount) {
     const container = document.getElementById(containerId);
-    const count = container.children.length + 1;
+    // forceCount lets a reopened claim recreate a block at its ORIGINAL
+    // saved number (see openInvestigationWorkspace) instead of always the
+    // next sequential position — required so a photo tagged e.g.
+    // "ActCorrective3_" still finds an actPrev_Corrective_3 container to
+    // land in even if blocks 1-2 had no saved text/images of their own.
+    const count = forceCount || (container.children.length + 1);
     const block = document.createElement('div'); block.className = 'action-block';
     block.innerHTML = `
       <div class="action-header">
@@ -5829,66 +5883,76 @@
       let oData = [];
       for (let i=1; i<=outflowWhyCount; i++) { const v=document.getElementById(`outflowWhyInput_${i}`)?.value; if(v) oData.push(`Why ${i}: ${v}${outflowRealIndex===i?' [REAL]':''}`); }
 
-      // Actions — read files from live input OR fall back to store, tag filenames with block type+number
+      // Actions — read files from live input OR fall back to existing photos, tag filenames with block type+number
+      // NOTE: image collection is intentionally OUTSIDE the `if (t)` text
+      // gate below — a Corrective/Preventive block with a photo attached
+      // but no description typed yet used to have that photo silently
+      // dropped from the save payload entirely (not just on reopen).
+      //
+      // Uses _resolveExistingPhotosForSave() (async) rather than reading
+      // investigationImageStore directly — a block whose photo was restored
+      // from a SharePoint/OneDrive URL (reopened claim, never re-attached
+      // this session) has no investigationImageStore entry at all, so
+      // reading the store directly would drop that photo from THIS save,
+      // even though nothing about it actually changed.
       let aData = []; let allActionImgs = [];
-      document.querySelectorAll('#correctiveWrap .action-block').forEach((b, i) => {
+      for (const [i, b] of Array.from(document.querySelectorAll('#correctiveWrap .action-block')).entries()) {
         const t=b.querySelector('.act-text').value; const eff=b.querySelector('.act-eff').value; const due=b.querySelector('.act-due').value;
         const fileInput=b.querySelector('.action-img-input');
         const previewDiv=fileInput?.nextElementSibling;
         const storeKey=previewDiv?.id;
-        if (t) {
-          aData.push(`[Corrective ${i+1}] ${t} (Eff: ${eff||'TBD'} | Due: ${due||'TBD'})`);
-          if (fileInput?.files.length > 0)
-            Array.from(fileInput.files).forEach(f => {
-              const taggedName = `ActCorrective${i+1}_${f.name}`;
-              allActionImgs.push({ref:`[Corrective ${i+1}]`, file:f, taggedName, dataUrl:null});
-            });
-          else if (storeKey && investigationImageStore[storeKey])
-            investigationImageStore[storeKey].forEach(e => {
-              const taggedName = e.name.startsWith('ActCorrective') ? e.name : `ActCorrective${i+1}_${e.name}`;
-              allActionImgs.push({ref:`[Corrective ${i+1}]`, file:null, dataUrl:e.dataUrl, taggedName, name:taggedName});
-            });
+        if (t) aData.push(`[Corrective ${i+1}] ${t} (Eff: ${eff||'TBD'} | Due: ${due||'TBD'})`);
+        if (fileInput?.files.length > 0) {
+          Array.from(fileInput.files).forEach(f => {
+            const taggedName = `ActCorrective${i+1}_${f.name}`;
+            allActionImgs.push({ref:`[Corrective ${i+1}]`, file:f, taggedName, dataUrl:null});
+          });
+        } else if (storeKey) {
+          (await _resolveExistingPhotosForSave(storeKey)).forEach(e => {
+            const taggedName = e.name && e.name.startsWith('ActCorrective') ? e.name : `ActCorrective${i+1}_${e.name||'image.jpg'}`;
+            allActionImgs.push({ref:`[Corrective ${i+1}]`, file:null, dataUrl:e.dataUrl, taggedName, name:taggedName});
+          });
         }
-      });
-      document.querySelectorAll('#preventiveWrap .action-block').forEach((b, i) => {
+      }
+      for (const [i, b] of Array.from(document.querySelectorAll('#preventiveWrap .action-block')).entries()) {
         const t=b.querySelector('.act-text').value; const eff=b.querySelector('.act-eff').value; const due=b.querySelector('.act-due').value;
         const fileInput=b.querySelector('.action-img-input');
         const previewDiv=fileInput?.nextElementSibling;
         const storeKey=previewDiv?.id;
-        if (t) {
-          aData.push(`[Preventive ${i+1}] ${t} (Eff: ${eff||'TBD'} | Due: ${due||'TBD'})`);
-          if (fileInput?.files.length > 0)
-            Array.from(fileInput.files).forEach(f => {
-              const taggedName = `ActPreventive${i+1}_${f.name}`;
-              allActionImgs.push({ref:`[Preventive ${i+1}]`, file:f, taggedName, dataUrl:null});
-            });
-          else if (storeKey && investigationImageStore[storeKey])
-            investigationImageStore[storeKey].forEach(e => {
-              const taggedName = e.name.startsWith('ActPreventive') ? e.name : `ActPreventive${i+1}_${e.name}`;
-              allActionImgs.push({ref:`[Preventive ${i+1}]`, file:null, dataUrl:e.dataUrl, taggedName, name:taggedName});
-            });
+        if (t) aData.push(`[Preventive ${i+1}] ${t} (Eff: ${eff||'TBD'} | Due: ${due||'TBD'})`);
+        if (fileInput?.files.length > 0) {
+          Array.from(fileInput.files).forEach(f => {
+            const taggedName = `ActPreventive${i+1}_${f.name}`;
+            allActionImgs.push({ref:`[Preventive ${i+1}]`, file:f, taggedName, dataUrl:null});
+          });
+        } else if (storeKey) {
+          (await _resolveExistingPhotosForSave(storeKey)).forEach(e => {
+            const taggedName = e.name && e.name.startsWith('ActPreventive') ? e.name : `ActPreventive${i+1}_${e.name||'image.jpg'}`;
+            allActionImgs.push({ref:`[Preventive ${i+1}]`, file:null, dataUrl:e.dataUrl, taggedName, name:taggedName});
+          });
         }
-      });
+      }
 
       // Inspection images — embed block number in the name so PAD uploads with a tagged filename
       // e.g. "InspBlock1_photo.jpg", "InspBlock2_photo.jpg"
       // This allows correct restoration to the right block after logout
       let inspImgs = [];
-      document.querySelectorAll('.dynamic-block .insp-img').forEach((inp, idx) => {
+      for (const [idx, inp] of Array.from(document.querySelectorAll('.dynamic-block .insp-img')).entries()) {
         const blockNum = idx + 1;
         const storeKey = `inspPrev_${blockNum}`;
-        if (inp.files.length > 0)
+        if (inp.files.length > 0) {
           Array.from(inp.files).forEach(f => {
             // Tag filename: "InspBlock1_originalname.jpg"
             const taggedName = `InspBlock${blockNum}_${f.name}`;
             inspImgs.push({ref:`[Inspection ${circledNumbers[idx]||blockNum}]`, file:f, taggedName, dataUrl:null});
           });
-        else if (investigationImageStore[storeKey])
-          investigationImageStore[storeKey].forEach(e => {
-            const taggedName = e.name.startsWith('InspBlock') ? e.name : `InspBlock${blockNum}_${e.name}`;
+        } else {
+          (await _resolveExistingPhotosForSave(storeKey)).forEach(e => {
+            const taggedName = e.name && e.name.startsWith('InspBlock') ? e.name : `InspBlock${blockNum}_${e.name||'image.jpg'}`;
             inspImgs.push({ref:`[Inspection ${circledNumbers[idx]||blockNum}]`, file:null, dataUrl:e.dataUrl, taggedName, name:taggedName});
           });
-      });
+        }
+      }
 
       // Encode to base64 — use taggedName so PAD uploads with the block-tagged filename
       const allImgs = inspImgs.concat(allActionImgs);
@@ -5943,6 +6007,65 @@
       alert("✅ Investigation saved! Photos are preserved.");
     }
     finally { if (saveBtn) { saveBtn.innerText = originalText; saveBtn.disabled = false; } }
+  }
+
+  /* ── Block-numbering helpers for reopening a saved claim ─────────────────
+     Both Inspection blocks and Corrective/Preventive Action blocks tag
+     their saved text with "[Detail N]" / "[Corrective N]" / "[Preventive N]"
+     and tag their saved photo filenames with "InspBlockN_" / "ActCorrectiveN_"
+     / "ActPreventiveN_" — N being that block's position AT THE TIME IT WAS
+     SAVED. On reopen, blocks must be recreated at those SAME positions (not
+     just recreated 1-by-1 in whatever order text/images happen to be found)
+     or a block's photo tag can no longer find a matching container to
+     restore into — see the long comment in openInvestigationWorkspace(). */
+
+  /** Parses "[Detail N] some text\n\n[Detail M] more text..." into
+   *  {N: "some text", M: "more text"}. N can be a circled digit (➀-➉) or a
+   *  bare/parenthesized number (blocks 11+, past the circled-glyph list). */
+  function _extractInspectionTextByBlock(rawInspect) {
+    const map = {};
+    if (!rawInspect || rawInspect === 'N/A') return map;
+    const markerAlt = circledNumbers.join('|');
+    const re = new RegExp(`\\[Detail\\s*(${markerAlt}|\\(?\\d+\\)?)\\]\\s*([\\s\\S]*?)(?=\\[Detail\\s*(?:${markerAlt}|\\(?\\d+\\)?)\\]|$)`, 'g');
+    let m;
+    while ((m = re.exec(rawInspect)) !== null) {
+      const circledIdx = circledNumbers.indexOf(m[1]);
+      const num = circledIdx >= 0 ? circledIdx + 1 : parseInt(m[1].replace(/[()]/g, ''), 10);
+      if (num) map[num] = (m[2] || '').trim();
+    }
+    return map;
+  }
+
+  /** Parses "[Corrective N] text (Eff: x | Due: y)" style entries (also used
+   *  for "Preventive") into {N: {text, eff, due}} for the given type. */
+  function _extractActionTextByBlock(apText, type) {
+    const map = {};
+    if (!apText) return map;
+    const re = new RegExp(`\\[${type}\\s*(\\d+)\\]\\s*([\\s\\S]*?)\\s*\\(Eff:\\s*(.*?)\\s*\\|\\s*Due:\\s*(.*?)\\)`, 'gi');
+    let m;
+    while ((m = re.exec(apText)) !== null) {
+      map[parseInt(m[1], 10)] = { text: (m[2] || '').trim(), eff: (m[3] || '').trim(), due: (m[4] || '').trim() };
+    }
+    return map;
+  }
+
+  /** Scans saved photo URLs (JSON array, comma-separated string, or plain
+   *  array) for filenames matching `tagRegex` (must have one capturing
+   *  group = the block number) and returns every block number found. */
+  function _extractTaggedBlockNumbers(rawUrls, tagRegex) {
+    let urls = [];
+    if (Array.isArray(rawUrls)) urls = rawUrls.filter(Boolean);
+    else if (typeof rawUrls === 'string' && rawUrls.trim()) {
+      try { urls = JSON.parse(rawUrls).filter(Boolean); }
+      catch (_) { urls = rawUrls.split(',').map(s => s.trim()).filter(Boolean); }
+    }
+    const nums = [];
+    urls.forEach(url => {
+      const filename = decodeURIComponent((String(url).split('/').pop() || '').split('?')[0]);
+      const m = filename.match(tagRegex);
+      if (m) nums.push(parseInt(m[1], 10));
+    });
+    return nums;
   }
 
   /* ── BRIDGE / OPEN INVESTIGATION ── */
@@ -6003,11 +6126,41 @@
     // Reset inspection blocks
     document.getElementById('inspectionBlocksWrap').innerHTML = ''; inspectionBlockCount = 0;
 
+    const invImgRaw   = claim.investigationImages || claim.InvestigationImages || claim.InvestigationIma || '';
+    const considImgRaw = claim.considerationImages || claim.ConsiderationImages || '';
+
     // Auto-fill inspection (reconstruct from saved text)
+    //
+    // BUGFIX: blocks used to be recreated purely by counting how many
+    // "[Detail N]" text segments were found, renumbering them 1, 2, 3...
+    // sequentially regardless of their ORIGINAL block number N. A block
+    // with a photo but no typed description (inspectionData only records
+    // blocks with non-empty text — see the `if (ta.value)` in
+    // saveInvestigation()) contributed no text segment at all, so e.g. a
+    // claim with only blocks 7 and 8 filled in reconstructed as blocks 1
+    // and 2 — and the saved photos, tagged "InspBlock7_"/"InspBlock8_" by
+    // restoreAllPreviewsFromUrls()/restorePreviewsFromStore() below, could
+    // never find a matching inspPrev_7/inspPrev_8 container to land in and
+    // were silently dropped. Saving again from that state then overwrote
+    // the claim's InvestigationImages with only whatever was visible in
+    // the (wrongly-numbered) DOM, permanently losing blocks 7/8's photos.
+    //
+    // Fix: rebuild using the UNION of every block number that has saved
+    // TEXT and/or a saved IMAGE (parsed from the tagged filenames), and
+    // create every block from 1 up to the highest of those numbers — so a
+    // block's position in the DOM always matches the number embedded in
+    // its own saved tag, however it re-populates.
     const rawInspect = resolveField(claim, ['inspectionData','InspectionData','inspection_data'], '');
-    if (rawInspect && rawInspect !== "N/A") {
-      const inspParts = rawInspect.split(/\[Detail [➀-➉\(\d+\)]+\]\s*/);
-      inspParts.forEach(p => { if(p.trim()) { addInspectionBlock(); document.getElementById(`inspText_${inspectionBlockCount}`).value = p.trim(); } });
+    const inspTextByBlock = _extractInspectionTextByBlock(rawInspect);
+    const inspImageBlockNums = _extractTaggedBlockNumbers(invImgRaw, /InspBlock(\d+)_/i)
+      .concat(_extractTaggedBlockNumbers(considImgRaw, /InspBlock(\d+)_/i));
+    const inspBlockNums = new Set([...Object.keys(inspTextByBlock).map(Number), ...inspImageBlockNums]);
+    if (inspBlockNums.size) {
+      const maxBlock = Math.max(...inspBlockNums);
+      for (let n = 1; n <= maxBlock; n++) {
+        addInspectionBlock();
+        if (inspTextByBlock[n]) document.getElementById(`inspText_${inspectionBlockCount}`).value = inspTextByBlock[n];
+      }
     }
     if (inspectionBlockCount === 0) addInspectionBlock();
 
@@ -6019,14 +6172,14 @@
     // payload — but until now nothing ever read it back on reopen, so those
     // photos silently vanished after a fresh page load even though they were
     // sitting correctly in Microsoft List the whole time.)
-    const invImgRaw   = claim.investigationImages || claim.InvestigationImages || claim.InvestigationIma || '';
-    const considImgRaw = claim.considerationImages || claim.ConsiderationImages || '';
     const hasMemoryPhotos = Object.keys(investigationImageStore).some(k => investigationImageStore[k]?.length > 0);
 
     if (hasMemoryPhotos) {
       // Restore from memory store (same session)
-      for (let i = 1; i <= inspectionBlockCount; i++) restorePreviewsFromStore(`inspPrev_${i}`);
-      makePreviewClickable(document.getElementById(`inspPrev_${i}`));
+      for (let i = 1; i <= inspectionBlockCount; i++) {
+        restorePreviewsFromStore(`inspPrev_${i}`);
+        makePreviewClickable(document.getElementById(`inspPrev_${i}`));
+      }
     } else {
       // Restore from URL links (after logout) — routes each URL to correct block by filename tag
       restoreAllPreviewsFromUrls(invImgRaw, considImgRaw);
@@ -6054,20 +6207,33 @@
     if (outflowWhyCount===0) addSpecificWhyRow('outflowWhyContainer','outflow');
 
     // Auto-fill Actions (with due date)
+    //
+    // Same numbering bug as Inspection above: an action block with a photo
+    // but no typed description contributed no "[Corrective N]"/"[Preventive
+    // N]" text entry, so recreating blocks purely from regex matches (in
+    // whatever order they were found, renumbered 1, 2, 3...) could land a
+    // later block's photos on the wrong container. Rebuild from the union
+    // of saved text AND saved image tags instead, same as inspection.
     document.getElementById('correctiveWrap').innerHTML = ""; document.getElementById('preventiveWrap').innerHTML = "";
     const apText = resolveField(claim, ['actionPlan','ActionPlan','action_plan'], '');
-    if (apText) {
-      const reg = /\[(Corrective|Preventive)\s*\d+\]\s*([\s\S]*?)\s*\(Eff:\s*(.*?)\s*\|\s*Due:\s*(.*?)\)/gi;
-      let actMatch;
-      while ((actMatch = reg.exec(apText)) !== null) {
-        const wrap = actMatch[1].toLowerCase()==='corrective' ? 'correctiveWrap' : 'preventiveWrap';
-        addActionBlock(wrap, actMatch[1]);
-        const b = document.getElementById(wrap).lastElementChild;
-        b.querySelector('.act-text').value = actMatch[2].trim();
-        if (actMatch[3] && actMatch[3]!=='TBD') b.querySelector('.act-eff').value = actMatch[3];
-        if (actMatch[4] && actMatch[4]!=='TBD') b.querySelector('.act-due').value = actMatch[4];
+    [['Corrective', 'correctiveWrap'], ['Preventive', 'preventiveWrap']].forEach(([type, wrap]) => {
+      const textByBlock = _extractActionTextByBlock(apText, type);
+      const imageBlockNums = _extractTaggedBlockNumbers(invImgRaw, new RegExp(`Act${type}(\\d+)_`, 'i'))
+        .concat(_extractTaggedBlockNumbers(considImgRaw, new RegExp(`Act${type}(\\d+)_`, 'i')));
+      const blockNums = new Set([...Object.keys(textByBlock).map(Number), ...imageBlockNums]);
+      if (!blockNums.size) return;
+      const maxBlock = Math.max(...blockNums);
+      for (let n = 1; n <= maxBlock; n++) {
+        addActionBlock(wrap, type, n);
+        const entry = textByBlock[n];
+        if (entry) {
+          const b = document.getElementById(wrap).lastElementChild;
+          b.querySelector('.act-text').value = entry.text;
+          if (entry.eff && entry.eff !== 'TBD') b.querySelector('.act-eff').value = entry.eff;
+          if (entry.due && entry.due !== 'TBD') b.querySelector('.act-due').value = entry.due;
+        }
       }
-    }
+    });
 
     // Restore action photo previews — already handled by restoreAllPreviewsFromUrls above (after logout)
     // For same-session: restore from memory store
