@@ -1209,42 +1209,65 @@
   const SAVE_CLOSE_CLAIM_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/f5e1f850c4b04190ac04690ff58bbba1/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=QhW_zhSs8UQBWsO37qlceoGghYA8c4zvrYPKZwk8rYc";
 
   // ── VERIFY CLAIM URL ─────────────────────────────────────────────────────
-  // Fired from the "Verify Claim" page in THREE distinct shapes — deliberately
-  // kept separate rather than one big bundled call, so the flow can branch
-  // cleanly and no request ever mixes text/JSON fields with photo bytes:
-  //
-  //   (a) tabSave:'assignVerifier' — Team Leader assigns a verify person.
-  //       Only { id, verificationAssignees, tabSave } is sent.
-  //   (b) (no tabSave) — submitting OK/NG results. Sends
-  //       { id, verificationData, verificationAssignees,
-  //         verificationTimestamps, status } — TEXT/JSON ONLY, NO PHOTOS.
-  //         1. Write verificationData (text, same "[Corrective N] OK/NG:
-  //            reason" format as actionPlan) into a VerificationData column
-  //         2. Write verificationAssignees (JSON: {"Corrective_1":{empId,
-  //            firstName,lastName}, ...}) into a VerificationAssignees column
-  //         3. Write verificationTimestamps (JSON: {"Corrective_1":"<ISO
-  //            date>", ...} — when that action was actually verified) into
-  //            a VerificationTimestamps column. This is what Evaluate
-  //            subject 5 (evalNotifySpeed) reads back for a Player's score
-  //            — see computeNotifyShopScore()'s Player branch.
-  //         4. If every action was marked OK, status will be "Verified"
-  //            (client already computes this — just write it through)
-  //   (c) tabSave:'evidencePhoto' — fired ONCE PER PHOTO, immediately after
-  //       (b). Sends { id, tabSave, photo:{name, content} } — exactly one
-  //       base64 image per call, never a bundled array. Upload THAT one
-  //       file to SharePoint at:
+  // Fired from the "Verify Claim" page. Payload shape matches the PAD Cloud
+  // Flow's JSON schema exactly:
+  //   {
+  //     id:                        string  — Microsoft List Item ID
+  //     status:                    string  — echoed as-is unless every
+  //                                           action just got marked OK, in
+  //                                           which case it's "Verified"
+  //     verificationData:          string  — "[Corrective N] OK/NG: reason"
+  //                                           per action, same convention
+  //                                           as ActionPlan
+  //     verificationAssignees:     string  — JSON: {"Corrective_1":{empId,
+  //                                           firstName,lastName}, ...} —
+  //                                           who verifies each action,
+  //                                           picked from that claim's
+  //                                           confirmed Investigation
+  //                                           players
+  //     verificationTimestamps:    string  — JSON: {"Corrective_1":"<ISO
+  //                                           date>", ...} — when THAT
+  //                                           action was actually verified.
+  //                                           This is what Evaluate subject
+  //                                           5 (evalNotifySpeed) reads
+  //                                           back for a Player's score —
+  //                                           see computeNotifyShopScore().
+  //     verificationVideo:         string  — JSON array of {subject, url}
+  //                                           (subject = "Corrective_1"
+  //                                           etc.) — evidence video LINKS
+  //                                           only (e.g. Teams/OneDrive),
+  //                                           never uploaded as base64.
+  //     verificationImagesBase64:  array   — [{name, content}, ...], one
+  //                                           entry per attached evidence
+  //                                           photo. Upload each to
+  //                                           SharePoint at:
   //       https://macoth.sharepoint.com/sites/qcbackupshared/General/Claim_images/6.Verification/
-  //       then APPEND the resulting link to the VerificationImages column
-  //       (JSON array of URLs) — do not replace it, and do not write the
-  //       base64 `content` itself into any column. photo.name is pre-tagged
-  //       "VerifyCorrectiveN_..." / "VerifyPreventiveN_..." so it can be
-  //       routed back to the right action on reopen.
-  //
-  // IMPORTANT: never map an incoming request body directly onto a list
-  // column (e.g. "just JSON-stringify the whole payload into a text field
-  // for now") — a photo's base64 `content` landing in ANY column claims.js
-  // reads from will get baked into claims.js on every regeneration and
-  // balloon that file. Only ever write back a SharePoint URL, never base64.
+  //                                           then write the resulting
+  //                                           links into a
+  //                                           VerificationImages column
+  //                                           (JSON array of URLs) — never
+  //                                           write the base64 `content`
+  //                                           itself into any list column
+  //                                           (that's what previously
+  //                                           bloated claims.js). Each
+  //                                           name is pre-tagged
+  //                                           "VerifyCorrectiveN_..." /
+  //                                           "VerifyPreventiveN_..." so it
+  //                                           routes back to the right
+  //                                           action on reopen.
+  //     verificationLog:           string  — accumulated audit trail, one
+  //                                           NEW line appended per submit:
+  //                                           "FirstName LastName,
+  //                                           Subject1|Subject2, DD/MM/YY
+  //                                           HH:MM:SS" — client sends the
+  //                                           FULL string (old + new line),
+  //                                           so just overwrite the column
+  //                                           with whatever's received.
+  //   }
+  // Also fired with a smaller { id, verificationAssignees, tabSave:
+  // 'assignVerifier' } payload the instant a Team Leader assigns a verify
+  // person — before "Submit Verification" is ever clicked — so an
+  // assignment isn't lost if they navigate away first.
   // PASTE YOUR "SmartQC - VerifyClaim" PAD/Power Automate HTTP TRIGGER URL
   // BELOW — this is currently a placeholder, so submitVerification() will
   // save locally (selectedClaimData) and no-op the network call until you
@@ -6877,6 +6900,28 @@
     catch (_) { return {}; }
   }
 
+  /** verificationVideo is stored as a JSON array of {subject,url} objects
+   *  (PAD flow's schema) — this returns it reshaped into a
+   *  {subject: url} map, matching how assignees/timestamps are looked up
+   *  by action key elsewhere in this module. */
+  function _getVerificationVideoMap(claim) {
+    const map = {};
+    try {
+      const arr = JSON.parse(resolveField(claim || {}, ['verificationVideo', 'VerificationVideo'], '[]'));
+      (Array.isArray(arr) ? arr : []).forEach(entry => {
+        if (entry && entry.subject && entry.url) map[entry.subject] = entry.url;
+      });
+    } catch (_) { /* leave map empty */ }
+    return map;
+  }
+
+  /** DD/MM/YY HH:MM:SS — same display convention self-evaluation and
+   *  Finding Risk timestamps already use elsewhere in this app, reused
+   *  here for verificationLog's accumulated entries. */
+  function _formatLogTimestamp(d) {
+    return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()).slice(-2)} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+  }
+
   /** Every "type_num" action key the CURRENTLY LOGGED-IN user is the
    *  assigned verify person for, on the given claim. Used both to gate
    *  which controls a Player can interact with on Verify Claim, and by
@@ -7084,6 +7129,10 @@
         <input type="file" class="form-control" accept="image/*" multiple onchange="handleInvestigationPreviews(this,'${containerId}')">
         <div id="${containerId}" class="preview-grid"></div>
       </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label style="font-size:11px;">Evidence Video Link (optional)</label>
+        <input type="url" class="form-control" placeholder="Paste a video link (Teams/OneDrive/etc.)" value="${escapeHtml(state.videoUrl || '')}" oninput="(verifyState['${key}']=verifyState['${key}']||{}).videoUrl=this.value">
+      </div>
       <div style="display:flex; gap:8px; align-items:center;">
         <button type="button" class="action-btn btn-verify-ok ${state.result === 'OK' ? 'selected' : ''}" onclick="setVerifyResult('${type}',${num},'OK')">✅ OK</button>
         <button type="button" class="action-btn btn-verify-ng ${state.result === 'NG' ? 'selected' : ''}" onclick="setVerifyResult('${type}',${num},'NG')">❌ NG</button>
@@ -7095,6 +7144,7 @@
       <div class="form-group" style="margin-bottom:0;">
         <label style="font-size:11px;">Evidence Picture(s)</label>
         <div id="${containerId}" class="preview-grid"></div>
+        ${state.videoUrl ? `<a href="${escapeHtml(state.videoUrl)}" target="_blank" rel="noopener" style="display:inline-block; margin-top:8px; font-size:11px; color:var(--red); font-weight:700;">▶ View evidence video</a>` : ''}
         <div style="font-size:11px; color:var(--charcoal-soft); margin-top:6px;">
           ${assigneeName ? `Only ${escapeHtml(assigneeName)} (the assigned verify person) can attach evidence or mark this action.` : 'No verify person assigned yet — the Team Leader needs to assign one before this action can be verified.'}
         </div>
@@ -7217,6 +7267,12 @@
       if (!verifyState[key]) verifyState[key] = {};
       verifyState[key].assignee = savedAssignees[key];
     });
+    // Merge in any saved evidence video links (also a separate field/JSON).
+    const savedVideos = _getVerificationVideoMap(claim);
+    Object.keys(savedVideos).forEach(key => {
+      if (!verifyState[key]) verifyState[key] = {};
+      verifyState[key].videoUrl = savedVideos[key];
+    });
 
     const role = getCurrentUserRoleOnClaim(claim);
     const correctiveWrap = document.getElementById('verifyCorrectiveWrap'); correctiveWrap.innerHTML = '';
@@ -7270,6 +7326,8 @@
     try {
       let vData = [];
       let verifyImgs = [];
+      let videos = [];
+      let touchedLabels = []; // "Corrective 1" etc. for every action actually decided THIS visit — feeds verificationLog
       let totalBlocks = 0, okBlocks = 0;
       // Start from whatever was already saved so an untouched action keeps
       // its ORIGINAL verification timestamp — only actions actually
@@ -7289,11 +7347,12 @@
           const state = verifyState[key] || {};
           totalBlocks++;
           if (state.assignee) assignees[key] = state.assignee;
+          if (state.videoUrl && state.videoUrl.trim()) videos.push({ subject: key, url: state.videoUrl.trim() });
           if (state.result) {
             const reasonPart = state.result === 'NG' && state.reason ? `: ${state.reason}` : '';
             vData.push(`[${type} ${num}] ${state.result}${reasonPart}`);
             if (state.result === 'OK') okBlocks++;
-            if (state.touchedNow) timestamps[key] = nowIso;
+            if (state.touchedNow) { timestamps[key] = nowIso; touchedLabels.push(`${type} ${num}`); }
           }
           // Evidence photos are collected regardless of whether OK/NG has
           // been picked yet — same reasoning as Inspection/Action photos:
@@ -7320,45 +7379,47 @@
       const allOk = totalBlocks > 0 && okBlocks === totalBlocks;
       const newStatus = allOk ? 'Verified' : ((selectedClaimData && selectedClaimData.status) || 'QC Investigated');
 
-      // ── Text/JSON fields go in ONE small request — never bundled with
-      // photo bytes. A flow that (mis)maps its whole incoming body onto a
-      // list column would otherwise bake base64 image data straight into
-      // VerificationData/VerificationAssignees, which then gets dumped
-      // into claims.js on every regeneration and balloons that file. Each
-      // photo instead goes out in ITS OWN request below (tabSave:
-      // 'evidencePhoto', one {name, content} at a time) — build a
-      // SEPARATE flow branch for that action: upload the single file to
+      // Accumulated audit trail — "FirstName LastName, Subject1|Subject2,
+      // DD/MM/YY HH:MM:SS" appended as one new line per submission, only
+      // when something was actually decided this visit (not on a
+      // no-op resubmit that only touched, say, an assignment elsewhere).
+      let verificationLog = resolveField(selectedClaimData, ['verificationLog', 'VerificationLog'], '');
+      if (touchedLabels.length) {
+        const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
+        const submitterName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || profile.empId || 'Unknown';
+        const logLine = `${submitterName}, ${touchedLabels.join('|')}, ${_formatLogTimestamp(new Date())}`;
+        verificationLog = verificationLog ? `${verificationLog}\n${logLine}` : logLine;
+      }
+
+      // Evidence photos upload to:
       // https://macoth.sharepoint.com/sites/qcbackupshared/General/Claim_images/6.Verification/
-      // and append the resulting link to VerificationImages; never write
-      // raw base64 into any list column.
+      // — matching the PAD Cloud Flow's JSON schema, everything goes out in
+      // ONE request; verificationImagesBase64 is the array of {name,
+      // content} the flow loops over to upload each file and write the
+      // resulting links into VerificationImages (never the base64 itself).
       const payload = {
         id: selectedClaimId.toString(),
+        status: newStatus,
         verificationData: verificationText,
         verificationAssignees: JSON.stringify(assignees),
         verificationTimestamps: JSON.stringify(timestamps),
-        status: newStatus
+        verificationVideo: JSON.stringify(videos),
+        verificationImagesBase64: verifyImgs.map(obj => ({ name: obj.name, content: obj.dataUrl.split(',')[1] })),
+        verificationLog: verificationLog
       };
 
       if (SAVE_VERIFICATION_URL && !SAVE_VERIFICATION_URL.startsWith('PASTE_')) {
         await fetch(SAVE_VERIFICATION_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        // One request per evidence photo — see the comment above for why
-        // these are kept out of the payload above entirely.
-        for (const img of verifyImgs) {
-          try {
-            await fetch(SAVE_VERIFICATION_URL, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: selectedClaimId.toString(), tabSave: 'evidencePhoto', photo: { name: img.name, content: img.dataUrl.split(',')[1] } })
-            });
-          } catch (e) { console.log('submitVerification photo upload (CORS suppressed):', img.name, e); }
-        }
       } else {
-        console.log('[submitVerification] SAVE_VERIFICATION_URL is still a placeholder — saved locally only:', payload, 'photos:', verifyImgs.map(i => i.name));
+        console.log('[submitVerification] SAVE_VERIFICATION_URL is still a placeholder — saved locally only:', payload);
       }
 
       if (selectedClaimData) {
         selectedClaimData.verificationData = verificationText;
         selectedClaimData.verificationAssignees = payload.verificationAssignees;
         selectedClaimData.verificationTimestamps = payload.verificationTimestamps;
+        selectedClaimData.verificationVideo = payload.verificationVideo;
+        selectedClaimData.verificationLog = verificationLog;
         // Forward-only, same guard as updateClaimStatus()/advanceClaimStatus()
         // — 'Verified' is the last pipeline stage so this can't normally
         // regress anything, but comparing ranks here rather than assigning
