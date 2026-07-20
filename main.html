@@ -2269,7 +2269,13 @@
     if (activeNav) activeNav.classList.add('active');
     if (titles[key]) { document.getElementById('topbarTitle').textContent = titles[key][0]; document.getElementById('topbarSubtitle').textContent = titles[key][1]; }
     if (key === 'complaints') fetchClaims();
-    if (key === 'verifyClaim') fetchVerifyQueue();
+    // Always land back on the queue (not wherever a previously-opened
+    // claim's workspace was left) when navigating to this tab — e.g.
+    // opening a claim, switching to another page, then clicking
+    // "Verify Claim" again should show every claim awaiting verification
+    // again, not the single claim last viewed. closeVerifyWorkspace()
+    // already does exactly this (hide workspace, show queue, refresh).
+    if (key === 'verifyClaim') closeVerifyWorkspace();
     if (key === 'scoreboard') renderScoreboard();
     if (key === 'teamGraph') renderTeamGraph();
     if (!skipHistory) history.pushState({ page: key }, '', '#' + key);
