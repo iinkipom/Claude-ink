@@ -773,7 +773,71 @@
   <div id="pagAnalytics" class="page-body" style="display:none;"></div>
   <div id="pagInquiryClaim" class="page-body" style="display:none;"><div style="padding:40px;text-align:center;color:var(--charcoal-soft);"><div style="font-size:32px;margin-bottom:12px;">🔍</div><h2 style="color:var(--charcoal);">Inquiry Claim</h2><p>This interface is under development.</p></div></div>
   <div id="pagShopAction" class="page-body" style="display:none;"><div style="padding:40px;text-align:center;color:var(--charcoal-soft);"><div style="font-size:32px;margin-bottom:12px;">🏭</div><h2 style="color:var(--charcoal);">Shop Action</h2><p>This interface is under development.</p></div></div>
-  <div id="pagVerifyClaim" class="page-body" style="display:none;"><div style="padding:40px;text-align:center;color:var(--charcoal-soft);"><div style="font-size:32px;margin-bottom:12px;">✅</div><h2 style="color:var(--charcoal);">Verify Claim</h2><p>This interface is under development.</p></div></div>
+  <div id="pagVerifyClaim" class="page-body" style="display:none;">
+
+    <!-- QUEUE VIEW: every claim that finished Investigation (status = QC Investigated)
+         and is awaiting someone to verify the shop actually completed its
+         Corrective/Preventive actions. -->
+    <div id="verifyQueueView">
+      <div class="form-card" style="padding: 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+          <h3 class="form-section-title" style="margin:0; border:none; padding:0;">Claims Awaiting Verification</h3>
+          <button class="btn" style="width:auto; padding:8px 16px; font-size:13px; background:var(--surface-2); color:var(--charcoal);" onclick="fetchVerifyQueue()">↻ Refresh Data</button>
+        </div>
+        <div class="claims-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Claim No.</th>
+                <th>Subject</th>
+                <th>Shop</th>
+                <th>Investigated On</th>
+                <th>Corrective</th>
+                <th>Preventive</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="verifyQueueBody">
+              <tr><td colspan="7" style="text-align:center; padding:40px; color:var(--charcoal-soft);">Loading claims...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- VERIFY WORKSPACE: hidden until a claim is opened from the queue above -->
+    <div id="verifyWorkspaceView" style="display:none;">
+      <div class="workspace-layout">
+
+        <div class="workspace-left" style="overflow-y:auto; max-height:calc(100vh - 80px);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h3 class="form-section-title" style="margin:0; border:none; padding:0;">Claim Summary</h3>
+            <button class="btn" style="width:auto; padding:6px 14px; font-size:12px; background:var(--surface-2); color:var(--charcoal);" onclick="closeVerifyWorkspace()">← Back to Queue</button>
+          </div>
+          <div class="claim-summary-item"><label>Claim No.</label><div id="verifyClaimNo">—</div></div>
+          <div class="claim-summary-item"><label>Subject</label><div id="verifySubject">—</div></div>
+          <div class="claim-summary-item"><label>Shop Concerned</label><div id="verifyShop">—</div></div>
+          <div class="claim-summary-item"><label>Root Cause</label><div id="verifyRootCause" style="white-space:pre-wrap; font-size:12px;">—</div></div>
+          <div class="claim-summary-item" style="border-bottom:none;"><label>Investigated / Closed On</label><div id="verifyClosedDate">—</div></div>
+        </div>
+
+        <div class="workspace-right" style="padding:24px; overflow-y:auto;">
+          <h3 class="form-section-title">Corrective Action Verification</h3>
+          <div id="verifyCorrectiveWrap"></div>
+
+          <h3 class="form-section-title" style="margin-top:24px;">Preventive Action Verification</h3>
+          <div id="verifyPreventiveWrap"></div>
+
+          <div style="display:flex; gap:10px; padding-top:16px; border-top:1px solid var(--border-light); margin-top:24px; align-items:center;">
+            <button class="btn btn-red" id="submitVerificationBtn" style="width:auto; padding:12px 24px;" onclick="submitVerification()">✅ Submit Verification</button>
+            <span id="verifyStatusMsg" style="font-size:12px; color:var(--charcoal-soft);"></span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
   <div id="pagFollowUpClaim" class="page-body" style="display:none;"><div style="padding:40px;text-align:center;color:var(--charcoal-soft);"><div style="font-size:32px;margin-bottom:12px;">📋</div><h2 style="color:var(--charcoal);">Follow up Claim</h2><p>This interface is under development.</p></div></div>
 
   <!-- ═══════════════════════ SCOREBOARD ═══════════════════════ -->
@@ -1144,6 +1208,23 @@
   // replace it (see the PASTE_ guard in closeClaimAndRecordTakeTime()).
   const SAVE_CLOSE_CLAIM_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/f5e1f850c4b04190ac04690ff58bbba1/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=QhW_zhSs8UQBWsO37qlceoGghYA8c4zvrYPKZwk8rYc";
 
+  // ── VERIFY CLAIM URL ─────────────────────────────────────────────────────
+  // Fired from the "Verify Claim" page when a reviewer submits OK/NG
+  // decisions for a claim's Corrective/Preventive actions. Should:
+  //   1. Write verificationData (text, same "[Corrective N] OK/NG: reason"
+  //      format as actionPlan) into a VerificationData column
+  //   2. Upload each attached evidence photo and write the resulting links
+  //      into a VerificationImages column (JSON array of URLs), same
+  //      pattern as InvestigationImages/ConsiderationImages
+  //   3. If every action was marked OK, the status field will be "Verified"
+  //      (client already computes this — just write it through as usual)
+  // Payload sent: { id, verificationData, status, verificationImagesBase64[] }
+  // PASTE YOUR "SmartQC - VerifyClaim" PAD/Power Automate HTTP TRIGGER URL
+  // BELOW — this is currently a placeholder, so submitVerification() will
+  // save locally (selectedClaimData) and no-op the network call until you
+  // replace it (see the PASTE_ guard in submitVerification()).
+  const SAVE_VERIFICATION_URL = "PASTE_YOUR_VERIFY_CLAIM_URL_HERE";
+
   // ── PAGE-LOAD / F5 REFRESH URL ───────────────────────────────────────────
   // Triggered ONCE whenever the browser tab is loaded or reloaded (F5 / Ctrl+R).
   // No 60-second polling — this fires only on an actual page refresh, so it's
@@ -1175,7 +1256,7 @@
   const _WRITE_FLOW_URLS = [
     CLAIM_SUBMIT_URL, SAVE_INVESTIGATION_URL, SAVE_FINDING_RISK_URL, START_CLAIM_URL,
     CONFIRM_PLAYERS_URL, SAVE_INSPECTION_URL, SAVE_ANALYSIS_URL, SAVE_CONSIDERATIONS_URL,
-    SAVE_EVALUATION_URL, SEND_APPOINTMENT_URL, SAVE_CLOSE_CLAIM_URL
+    SAVE_EVALUATION_URL, SEND_APPOINTMENT_URL, SAVE_CLOSE_CLAIM_URL, SAVE_VERIFICATION_URL
   ].filter(u => u && !u.startsWith('PASTE_'));
   (function installWriteTracker() {
     const origFetch = window.fetch.bind(window);
@@ -2169,6 +2250,7 @@
     complaints:   ['Active Claims',             'Select a claim to begin investigation'],
     analytics:    ['Analytics',                 'Quality metrics and team performance data'],
     investigation:['Step 2: QC Investigation',  'Analyze root cause and define corrective actions'],
+    verifyClaim:  ['Verify Claim',               'Confirm corrective/preventive actions were completed by the shop'],
     scoreboard:   ['Scoreboard',                'Response time and performance scoring, week by week'],
     teamGraph:    ['Team Graph',                'Total Point vs Target Point, visualized by period']
   };
@@ -2187,6 +2269,7 @@
     if (activeNav) activeNav.classList.add('active');
     if (titles[key]) { document.getElementById('topbarTitle').textContent = titles[key][0]; document.getElementById('topbarSubtitle').textContent = titles[key][1]; }
     if (key === 'complaints') fetchClaims();
+    if (key === 'verifyClaim') fetchVerifyQueue();
     if (key === 'scoreboard') renderScoreboard();
     if (key === 'teamGraph') renderTeamGraph();
     if (!skipHistory) history.pushState({ page: key }, '', '#' + key);
@@ -2934,7 +3017,7 @@
      only ever moves status FORWARD through this pipeline, never backward.
      Editing and re-saving an earlier tab on an already-completed claim no
      longer touches its status at all. */
-  const CLAIM_STATUS_PIPELINE = ['', 'Investigating', 'Finding Risk', 'Inspectioning', 'Trouble Analyzing', 'Meeting With Shop', 'QC Investigated'];
+  const CLAIM_STATUS_PIPELINE = ['', 'Investigating', 'Finding Risk', 'Inspectioning', 'Trouble Analyzing', 'Meeting With Shop', 'QC Investigated', 'Verified'];
   function _statusRank(status) {
     const idx = CLAIM_STATUS_PIPELINE.indexOf((status || '').toString().trim());
     return idx === -1 ? 0 : idx;
@@ -3951,6 +4034,7 @@
         : String(rawStat).trim();
     return statusVal === 'Investigated'
       || statusVal === 'QC Investigated'
+      || statusVal === 'Verified'
       || statusVal.includes('Investigated');
   }
 
@@ -6265,6 +6349,7 @@
       || statusVal === 'Trouble Analyzing'
       || statusVal === 'Meeting With Shop'
       || statusVal === 'QC Investigated'
+      || statusVal === 'Verified'
       || statusVal.includes('Step 2')
       || statusVal.includes('Investigated'));
     if (alreadyStarted) {
@@ -6329,6 +6414,7 @@
     else if (rawStatus==='Trouble Analyzing'){statusLabel='ANALYZING';     statusClass='status-analyzing';}
     else if (rawStatus==='Meeting With Shop'){statusLabel='MEETING';       statusClass='status-meeting';}
     else if (rawStatus==='QC Investigated')  {statusLabel='INVESTIGATED';  statusClass='status-done';}
+    else if (rawStatus==='Verified')         {statusLabel='VERIFIED';      statusClass='status-verified';}
     else if (rawStatus.includes('Step 2') || rawStatus.includes('Investigated')) {statusLabel='INVESTIGATING'; statusClass='status-investigating';}
     else if (rawStatus !== '')               {statusLabel=rawStatus.toUpperCase(); statusClass='status-new';}
 
@@ -6631,6 +6717,335 @@
       console.error('[fetchClaims] Failed to load claims.js:', e);
       tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:30px;color:red;">Error loading claims.js</td></tr>';
     });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     VERIFY CLAIM — confirm the shop actually completed the Corrective/
+     Preventive actions defined during Investigation.
+     Queue = every claim with status "QC Investigated". Opening one parses
+     its actionPlan (same format Investigation writes) into a checklist —
+     one row per Corrective/Preventive action, each showing whether its
+     Effective/Due date has been reached yet, an evidence-photo attach, and
+     an OK/NG call. Submitting writes a new "verificationData" text field
+     (same "[Corrective N] OK/NG: reason" convention as actionPlan) and a
+     "verificationImages" field (same convention as InvestigationImages),
+     and — only once EVERY action on the claim is marked OK — advances the
+     claim's status to "Verified" via the existing forward-only pipeline.
+     ═══════════════════════════════════════════════════════════════════════ */
+  let verifyState = {}; // `${type}_${num}` -> { result: 'OK'|'NG'|null, reason: '' }
+
+  /** Parses "[Corrective N] OK: reason\n\n[Preventive M] NG: reason..." (the
+   *  format submitVerification() writes) back into
+   *  {"Corrective_N": {result, reason}, "Preventive_M": {...}}, so
+   *  reopening a partially-verified claim restores prior OK/NG picks. */
+  function _extractVerificationByBlock(raw) {
+    const map = {};
+    if (!raw) return map;
+    const re = /\[(Corrective|Preventive)\s*(\d+)\]\s*(OK|NG)\s*(?::\s*([\s\S]*?))?\s*(?=\[(?:Corrective|Preventive)\s*\d+\]|$)/gi;
+    let m;
+    while ((m = re.exec(raw)) !== null) {
+      const type = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
+      map[`${type}_${parseInt(m[2], 10)}`] = { result: m[3].toUpperCase(), reason: (m[4] || '').trim() };
+    }
+    return map;
+  }
+
+  /** Same idea as restoreAllPreviewsFromUrls() (used for Inspection/Action
+   *  photos) but for the separate VerificationImages field — routes each
+   *  URL to its verifyPrev_<Type>_<N> container by the "VerifyCorrectiveN_"
+   *  / "VerifyPreventiveN_" tag baked into its filename. */
+  function _restoreVerificationPhotosFromUrls(rawUrls) {
+    let urls = [];
+    if (Array.isArray(rawUrls)) urls = rawUrls.filter(Boolean);
+    else if (typeof rawUrls === 'string' && rawUrls.trim()) {
+      try { urls = JSON.parse(rawUrls).filter(Boolean); }
+      catch (_) { urls = rawUrls.split(',').map(s => s.trim()).filter(Boolean); }
+    }
+    const groups = {};
+    urls.forEach(url => {
+      const filename = decodeURIComponent((String(url).split('/').pop() || '').split('?')[0]);
+      let key = null;
+      const cm = filename.match(/VerifyCorrective(\d+)_/i);
+      if (cm) key = `verifyPrev_Corrective_${cm[1]}`;
+      const pm = filename.match(/VerifyPreventive(\d+)_/i);
+      if (pm) key = `verifyPrev_Preventive_${pm[1]}`;
+      if (!key) return;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(url);
+    });
+    Object.entries(groups).forEach(([containerId, groupUrls]) => {
+      if (document.getElementById(containerId)) restorePreviewsFromUrls(containerId, groupUrls);
+    });
+  }
+
+  /** Loads claims.js fresh and renders every "QC Investigated" claim into
+   *  the queue table — same refresh-button pattern as Active Claims Queue. */
+  function fetchVerifyQueue() {
+    const tbody = document.getElementById('verifyQueueBody');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;">Loading claims awaiting verification...</td></tr>';
+
+    loadDataScript('claims.js', ['ACTIVE_CLAIMS_DATABASE']).then((result) => {
+      if (!Array.isArray(result.ACTIVE_CLAIMS_DATABASE)) throw new Error('ACTIVE_CLAIMS_DATABASE not found in claims.js');
+      window.ACTIVE_CLAIMS_DATABASE = result.ACTIVE_CLAIMS_DATABASE;
+      activeClaimsList = result.ACTIVE_CLAIMS_DATABASE;
+
+      const queue = activeClaimsList.filter(c => {
+        const raw = c.status ?? c.Status ?? c.ClaimStatus ?? c.Claim_Status ?? null;
+        const val = raw === null ? '' : (typeof raw === 'object' ? (raw.Value || raw.value || '') : String(raw).trim());
+        return val === 'QC Investigated';
+      });
+
+      if (!queue.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--charcoal-soft);">No claims are currently awaiting verification.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = '';
+      queue.forEach((claim, i) => {
+        const runNo = claim.index_running_no || claim.IndexRunningNo || claim.index || claim.Index || (i + 1);
+        const cNo = buildClaimNo(runNo, resolveField(claim, ['issueDate', 'IssueDate'], ''));
+
+        var shopVal = '—';
+        var _shopRaw = claim.shopConcerned || claim.ShopConcerned || claim.ClaimShop || claim.claimShop || '';
+        try {
+          var sc = JSON.parse(_shopRaw);
+          if (Array.isArray(sc) && sc.length > 0) shopVal = sc.join(', ');
+          else if (typeof sc === 'string' && sc.trim()) shopVal = sc.trim();
+        } catch (_) { if (_shopRaw && _shopRaw.trim()) shopVal = _shopRaw.trim(); }
+
+        const closeDateRaw = claim.CloseDate || claim.closeDate;
+        const apText = resolveField(claim, ['actionPlan', 'ActionPlan', 'action_plan'], '');
+        const correctiveCount = Object.keys(_extractActionTextByBlock(apText, 'Corrective')).length;
+        const preventiveCount = Object.keys(_extractActionTextByBlock(apText, 'Preventive')).length;
+
+        const tr = document.createElement('tr');
+        tr.style.cursor = 'pointer';
+        tr.onclick = () => openVerifyWorkspace(claim);
+        tr.innerHTML = `
+          <td style="font-weight:800;color:var(--red);white-space:nowrap;font-size:12px;">${cNo}</td>
+          <td style="font-weight:700;">${resolveField(claim, ['Subject', 'subject'], 'N/A')}</td>
+          <td style="font-size:11px;">${shopVal}</td>
+          <td style="font-size:11px;white-space:nowrap;">${closeDateRaw ? formatDateDisplay(closeDateRaw) : '—'}</td>
+          <td style="font-size:11px;text-align:center;">${correctiveCount || '—'}</td>
+          <td style="font-size:11px;text-align:center;">${preventiveCount || '—'}</td>
+          <td><span class="status-badge status-done">QC INVESTIGATED</span></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }).catch((e) => {
+      console.error('[fetchVerifyQueue] Failed to load claims.js:', e);
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:red;">Error loading claims.js</td></tr>';
+    });
+  }
+
+  /** Builds one action-checklist row: description (read-only — this page
+   *  verifies the plan, it doesn't edit it), Eff/Due dates with a
+   *  "ready to verify" badge, evidence photo attach, and OK/NG buttons. */
+  function _renderVerifyActionBlock(type, num, entry, containerEl) {
+    const eff = entry.eff && entry.eff !== 'TBD' ? entry.eff : '';
+    const due = entry.due && entry.due !== 'TBD' ? entry.due : '';
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const effReached = !!(eff && new Date(eff) <= today);
+    const dueReached = !!(due && new Date(due) <= today);
+    const readyBadge = (!eff && !due)
+      ? '<span class="status-badge verify-ready-badge" style="background:var(--ivory-deep); color:var(--charcoal-soft);">NO DATE SET</span>'
+      : (effReached || dueReached)
+        ? '<span class="status-badge verify-ready-badge status-active">READY TO VERIFY</span>'
+        : '<span class="status-badge verify-ready-badge" style="background:#fff8e0; color:#886600; border:1px solid #e8d080;">NOT YET DUE</span>';
+
+    const key = `${type}_${num}`;
+    const state = verifyState[key] || {};
+    const containerId = `verifyPrev_${type}_${num}`;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'action-block';
+    wrap.id = `verifyBlock_${type}_${num}`;
+    wrap.innerHTML = `
+      <div class="action-header">
+        <span>${type} Action #${num}</span>
+        ${readyBadge}
+      </div>
+      <div style="font-size:13px; color:var(--charcoal); margin-bottom:10px; white-space:pre-wrap;">${escapeHtml(entry.text || '(no description recorded)')}</div>
+      <div style="display:flex; gap:16px; flex-wrap:wrap; font-size:11px; color:var(--charcoal-soft); margin-bottom:12px;">
+        <span><strong>Effective:</strong> ${eff ? formatDateDisplay(eff) : '—'}</span>
+        <span><strong>Due:</strong> ${due ? formatDateDisplay(due) : '—'}</span>
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label style="font-size:11px;">Evidence Picture(s)</label>
+        <input type="file" class="form-control" accept="image/*" multiple onchange="handleInvestigationPreviews(this,'${containerId}')">
+        <div id="${containerId}" class="preview-grid"></div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button type="button" class="action-btn btn-verify-ok ${state.result === 'OK' ? 'selected' : ''}" onclick="setVerifyResult('${type}',${num},'OK')">✅ OK</button>
+        <button type="button" class="action-btn btn-verify-ng ${state.result === 'NG' ? 'selected' : ''}" onclick="setVerifyResult('${type}',${num},'NG')">❌ NG</button>
+      </div>
+      <div id="verifyReason_${type}_${num}" class="dynamic-input-wrap ${state.result === 'NG' ? '' : 'hidden'}" style="margin-top:10px;">
+        <textarea class="form-control" placeholder="Reason for NG…" oninput="verifyState['${key}'].reason=this.value" style="min-height:50px;">${escapeHtml(state.reason || '')}</textarea>
+      </div>
+    `;
+    containerEl.appendChild(wrap);
+  }
+
+  /** Toggles an action's OK/NG call (clicking the already-selected one
+   *  clears it back to undecided) and shows/hides the NG reason box. */
+  function setVerifyResult(type, num, result) {
+    const key = `${type}_${num}`;
+    if (!verifyState[key]) verifyState[key] = { reason: '' };
+    verifyState[key].result = verifyState[key].result === result ? null : result;
+
+    const block = document.getElementById(`verifyBlock_${type}_${num}`);
+    if (block) {
+      block.querySelector('.btn-verify-ok').classList.toggle('selected', verifyState[key].result === 'OK');
+      block.querySelector('.btn-verify-ng').classList.toggle('selected', verifyState[key].result === 'NG');
+    }
+    const reasonWrap = document.getElementById(`verifyReason_${type}_${num}`);
+    if (reasonWrap) reasonWrap.classList.toggle('hidden', verifyState[key].result !== 'NG');
+  }
+
+  function closeVerifyWorkspace() {
+    document.getElementById('verifyWorkspaceView').style.display = 'none';
+    document.getElementById('verifyQueueView').style.display = 'block';
+    fetchVerifyQueue(); // pick up anything that changed while the workspace was open
+  }
+
+  function openVerifyWorkspace(claim) {
+    selectedClaimId = claim.id || claim.ID;
+    selectedClaimData = claim;
+    investigationImageStore = claim._photos ? Object.assign({}, claim._photos) : {};
+    verifyState = {};
+
+    document.getElementById('verifyQueueView').style.display = 'none';
+    document.getElementById('verifyWorkspaceView').style.display = 'block';
+
+    const runNo = claim.index_running_no || claim.IndexRunningNo || claim.index || claim.Index || 1;
+    document.getElementById('verifyClaimNo').textContent = buildClaimNo(runNo, resolveField(claim, ['issueDate', 'IssueDate'], ''));
+    document.getElementById('verifySubject').textContent = resolveField(claim, ['Subject', 'subject'], 'N/A');
+
+    var shopVal = '—';
+    var _shopRaw = claim.shopConcerned || claim.ShopConcerned || claim.ClaimShop || claim.claimShop || '';
+    try {
+      var sc = JSON.parse(_shopRaw);
+      if (Array.isArray(sc) && sc.length > 0) shopVal = sc.join(', ');
+      else if (typeof sc === 'string' && sc.trim()) shopVal = sc.trim();
+    } catch (_) { if (_shopRaw && _shopRaw.trim()) shopVal = _shopRaw.trim(); }
+    document.getElementById('verifyShop').textContent = shopVal;
+
+    document.getElementById('verifyRootCause').textContent = resolveField(claim, ['rootCauseAnalysis', 'RootCauseAnalysis', 'troubleAnalysis', 'TroubleAnalysis'], 'N/A');
+    const closeDateRaw = claim.CloseDate || claim.closeDate;
+    document.getElementById('verifyClosedDate').textContent = closeDateRaw ? formatDateDisplay(closeDateRaw) : '—';
+
+    const apText = resolveField(claim, ['actionPlan', 'ActionPlan', 'action_plan'], '');
+    const verifDataRaw = resolveField(claim, ['verificationData', 'VerificationData'], '');
+    verifyState = _extractVerificationByBlock(verifDataRaw);
+
+    const verifyImgRaw = claim.verificationImages || claim.VerificationImages || '';
+    const correctiveByBlock = _extractActionTextByBlock(apText, 'Corrective');
+    const preventiveByBlock = _extractActionTextByBlock(apText, 'Preventive');
+    const correctiveImgNums = _extractTaggedBlockNumbers(verifyImgRaw, /VerifyCorrective(\d+)_/i);
+    const preventiveImgNums = _extractTaggedBlockNumbers(verifyImgRaw, /VerifyPreventive(\d+)_/i);
+    const correctiveNums = Array.from(new Set([...Object.keys(correctiveByBlock).map(Number), ...correctiveImgNums])).sort((a, b) => a - b);
+    const preventiveNums = Array.from(new Set([...Object.keys(preventiveByBlock).map(Number), ...preventiveImgNums])).sort((a, b) => a - b);
+
+    const correctiveWrap = document.getElementById('verifyCorrectiveWrap'); correctiveWrap.innerHTML = '';
+    const preventiveWrap = document.getElementById('verifyPreventiveWrap'); preventiveWrap.innerHTML = '';
+
+    if (!correctiveNums.length) correctiveWrap.innerHTML = '<p style="font-size:12px;color:var(--charcoal-soft);">No corrective actions were recorded for this claim.</p>';
+    else correctiveNums.forEach(n => _renderVerifyActionBlock('Corrective', n, correctiveByBlock[n] || { text: '', eff: '', due: '' }, correctiveWrap));
+
+    if (!preventiveNums.length) preventiveWrap.innerHTML = '<p style="font-size:12px;color:var(--charcoal-soft);">No preventive actions were recorded for this claim.</p>';
+    else preventiveNums.forEach(n => _renderVerifyActionBlock('Preventive', n, preventiveByBlock[n] || { text: '', eff: '', due: '' }, preventiveWrap));
+
+    // Restore evidence photos: same-session memory store, else from saved URLs
+    const hasMemoryPhotos = Object.keys(investigationImageStore).some(k => investigationImageStore[k]?.length > 0);
+    if (hasMemoryPhotos) {
+      correctiveNums.forEach(n => { restorePreviewsFromStore(`verifyPrev_Corrective_${n}`); makePreviewClickable(document.getElementById(`verifyPrev_Corrective_${n}`)); });
+      preventiveNums.forEach(n => { restorePreviewsFromStore(`verifyPrev_Preventive_${n}`); makePreviewClickable(document.getElementById(`verifyPrev_Preventive_${n}`)); });
+    } else {
+      _restoreVerificationPhotosFromUrls(verifyImgRaw);
+    }
+
+    document.getElementById('verifyStatusMsg').textContent = '';
+  }
+
+  async function submitVerification() {
+    if (!selectedClaimId) return;
+    const btn = document.getElementById('submitVerificationBtn');
+    const originalText = btn.innerText;
+    btn.innerText = '✅ Sending...'; btn.disabled = true;
+    const statusMsg = document.getElementById('verifyStatusMsg'); statusMsg.textContent = '';
+
+    try {
+      let vData = [];
+      let verifyImgs = [];
+      let totalBlocks = 0, okBlocks = 0;
+
+      for (const type of ['Corrective', 'Preventive']) {
+        const wrap = document.getElementById(type === 'Corrective' ? 'verifyCorrectiveWrap' : 'verifyPreventiveWrap');
+        for (const block of Array.from(wrap.querySelectorAll('.action-block'))) {
+          const m = block.id.match(/^verifyBlock_(Corrective|Preventive)_(\d+)$/);
+          if (!m) continue;
+          const num = m[2];
+          const key = `${type}_${num}`;
+          const state = verifyState[key] || {};
+          totalBlocks++;
+          if (state.result) {
+            const reasonPart = state.result === 'NG' && state.reason ? `: ${state.reason}` : '';
+            vData.push(`[${type} ${num}] ${state.result}${reasonPart}`);
+            if (state.result === 'OK') okBlocks++;
+          }
+          // Evidence photos are collected regardless of whether OK/NG has
+          // been picked yet — same reasoning as Inspection/Action photos:
+          // an attachment shouldn't depend on a decision also being made
+          // in the same visit.
+          const containerId = `verifyPrev_${type}_${num}`;
+          const photos = await _resolveExistingPhotosForSave(containerId);
+          photos.forEach(e => {
+            const taggedName = e.name && e.name.startsWith(`Verify${type}`) ? e.name : `Verify${type}${num}_${e.name || 'image.jpg'}`;
+            verifyImgs.push({ name: taggedName, dataUrl: e.dataUrl });
+          });
+        }
+      }
+
+      if (!vData.length) {
+        alert('Mark at least one action OK or NG before submitting.');
+        return;
+      }
+
+      const verificationImagesBase64 = verifyImgs.map(obj => ({ name: obj.name, content: obj.dataUrl.split(',')[1] }));
+      const verificationText = vData.join('\n\n');
+      // Only advance to "Verified" once EVERY action on the claim has been
+      // marked OK — a single NG (or anything still undecided) keeps the
+      // claim at its current status so it stays visible in this queue.
+      const allOk = totalBlocks > 0 && okBlocks === totalBlocks;
+      const newStatus = allOk ? 'Verified' : ((selectedClaimData && selectedClaimData.status) || 'QC Investigated');
+
+      const payload = {
+        id: selectedClaimId.toString(),
+        verificationData: verificationText,
+        status: newStatus,
+        verificationImagesBase64: verificationImagesBase64
+      };
+
+      if (SAVE_VERIFICATION_URL && !SAVE_VERIFICATION_URL.startsWith('PASTE_')) {
+        await fetch(SAVE_VERIFICATION_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      } else {
+        console.log('[submitVerification] SAVE_VERIFICATION_URL is still a placeholder — saved locally only:', payload);
+      }
+
+      if (selectedClaimData) {
+        selectedClaimData.verificationData = verificationText;
+        if (allOk) selectedClaimData.status = 'Verified';
+      }
+
+      statusMsg.textContent = allOk ? '✔ All actions verified — claim marked Verified.' : '✔ Verification saved.';
+      alert(allOk ? '✅ All actions verified! Claim marked as Verified.' : '✅ Verification saved.');
+    } catch (e) {
+      console.log('submitVerification (CORS suppressed):', e);
+      statusMsg.textContent = '✔ Submitted (check flow)';
+    } finally {
+      btn.innerText = originalText; btn.disabled = false;
+    }
   }
 
   /* ── GENERATE DRAFT REPORT (Print / A4) ── */
