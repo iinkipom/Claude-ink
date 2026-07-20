@@ -3028,6 +3028,15 @@
   /* ── ⑧ updateClaimStatus ─────────────────────────────────────────────── */
   async function updateClaimStatus(newStatus) {
     if (!selectedClaimId) return;
+    // Forward-only even at this low level — belt-and-suspenders alongside
+    // advanceClaimStatus() so status can never regress no matter which
+    // function ends up calling this one (e.g. startClaimCase() used to
+    // call this directly, bypassing advanceClaimStatus's guard entirely).
+    // _statusRank/CLAIM_STATUS_PIPELINE are declared further down this
+    // file, but by the time any click can actually reach this function
+    // the whole script has already finished its initial top-to-bottom run.
+    const current = selectedClaimData ? (selectedClaimData.status || '') : '';
+    if (_statusRank(newStatus) < _statusRank(current)) return;
     if (selectedClaimData) selectedClaimData.status = newStatus;
     const url = (typeof SAVE_INVESTIGATION_URL!=='undefined') ? SAVE_INVESTIGATION_URL : '';
     if (url && !url.startsWith('PASTE_')) {
@@ -4589,15 +4598,31 @@
   async function startClaimCase() {
     const profile0 = JSON.parse(localStorage.getItem('userProfile')) || {};
     if (profile0.userType !== 'Team Leader') { alert('Only Team Leader can start the investigation.'); return; }
+
+    // "First timestamp always" — if this claim already has a StartDate
+    // (e.g. a stale page still showing the Start Gate for a claim that was
+    // actually already started, in this session or another), don't
+    // re-stamp it or re-send START_CLAIM_URL; just move past the gate with
+    // whatever's already recorded.
+    if (selectedClaimData && (selectedClaimData.StartDate || selectedClaimData.startDate)) {
+      document.getElementById('startGate').style.display='none';
+      document.getElementById('investigationContent').style.display='flex';
+      loadPlayerRoster();
+      return;
+    }
+
     const btn = document.querySelector('#startGate button');
     const origText = btn.innerText; btn.innerText = "⏳ Recording..."; btn.disabled = true;
-    updateClaimStatus('Investigating');
+    advanceClaimStatus('Investigating'); // forward-only — was updateClaimStatus() directly, which could regress an already-further-along claim
     const profile = JSON.parse(localStorage.getItem('userProfile')) || {};
     const teamLeaderName = `${profile.firstName||''} ${profile.lastName||''}`.trim() || profile.empId || 'Unknown';
     try {
       await fetch(START_CLAIM_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id:selectedClaimId.toString(), teamLeader:teamLeaderName }) });
     } catch(e) { console.log('Start claim (CORS).',e); }
-    if (selectedClaimData) { selectedClaimData.StartDate=new Date().toISOString(); selectedClaimData.teamLeader=teamLeaderName; }
+    if (selectedClaimData) {
+      selectedClaimData.StartDate  = selectedClaimData.StartDate || new Date().toISOString();
+      selectedClaimData.teamLeader = selectedClaimData.teamLeader || teamLeaderName;
+    }
     document.getElementById('startGate').style.display='none';
     document.getElementById('investigationContent').style.display='flex';
     loadPlayerRoster();
@@ -5662,7 +5687,18 @@
   async function closeClaimAndRecordTakeTime(claimData) {
     const startRaw = claimData && (claimData.StartDate || claimData.startDate);
     const claimId   = claimData && (claimData.id || claimData.ID);
-    const closeDate = new Date(); // "now" — recorded as CloseDate
+
+    // "First timestamp always" — if this claim was already closed (e.g. the
+    // Team Leader clicks "Generate Draft Report" again later just to
+    // reprint it), reuse the ORIGINAL CloseDate instead of stamping "now"
+    // again. Recomputing from a fresh "now" on every re-generation would
+    // silently push ClaimTakeTime/InitialScore/SpecialScore/TotalScore
+    // later and corrupt the recorded performance data on every reprint —
+    // and skip re-sending SAVE_CLOSE_CLAIM_URL too, so a re-print can never
+    // overwrite the value already recorded in the Microsoft List.
+    const existingCloseRaw = claimData && (claimData.CloseDate || claimData.closeDate);
+    const alreadyClosed = !!existingCloseRaw;
+    const closeDate = alreadyClosed ? new Date(existingCloseRaw) : new Date();
 
     const claimTakeTime = startRaw ? calculateClaimTakeTime(startRaw, closeDate) : 0;
     const closeDateIso  = closeDate.toISOString();
@@ -5670,31 +5706,35 @@
     // Performance score reuses this SAME claimTakeTime value — never re-derived.
     const { initialScore, specialScore, totalScore } = calculatePerformanceScore(claimData, claimTakeTime);
 
-    const url = (typeof SAVE_CLOSE_CLAIM_URL !== 'undefined') ? SAVE_CLOSE_CLAIM_URL : '';
-    if (url && !url.startsWith('PASTE_') && claimId) {
-      try {
-        console.log('[CloseClaim] Sending to SmartQC - CloseClaim:', { url, id: claimId.toString(), closeDate: closeDateIso, claimTakeTime, initialScore, specialScore, totalScore, startDate: startRaw || null });
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: claimId.toString(),
-            closeDate: closeDateIso,
-            claimTakeTime: claimTakeTime,
-            initialScore: initialScore,
-            specialScore: specialScore,
-            totalScore: totalScore,
-            startDate: startRaw || null
-          })
-        });
-        console.log('[CloseClaim] fetch resolved (note: with CORS this may report ok even if Power Automate rejected it server-side — check Run History to confirm) — status:', res.status);
-      } catch (e) {
-        console.log('[CloseClaim] fetch threw — likely CORS or network failure (CORS suppressed):', e);
+    if (alreadyClosed) {
+      console.log('[CloseClaim] Already closed — reusing original CloseDate instead of re-stamping, and skipping the network write:', closeDateIso);
+    } else {
+      const url = (typeof SAVE_CLOSE_CLAIM_URL !== 'undefined') ? SAVE_CLOSE_CLAIM_URL : '';
+      if (url && !url.startsWith('PASTE_') && claimId) {
+        try {
+          console.log('[CloseClaim] Sending to SmartQC - CloseClaim:', { url, id: claimId.toString(), closeDate: closeDateIso, claimTakeTime, initialScore, specialScore, totalScore, startDate: startRaw || null });
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: claimId.toString(),
+              closeDate: closeDateIso,
+              claimTakeTime: claimTakeTime,
+              initialScore: initialScore,
+              specialScore: specialScore,
+              totalScore: totalScore,
+              startDate: startRaw || null
+            })
+          });
+          console.log('[CloseClaim] fetch resolved (note: with CORS this may report ok even if Power Automate rejected it server-side — check Run History to confirm) — status:', res.status);
+        } catch (e) {
+          console.log('[CloseClaim] fetch threw — likely CORS or network failure (CORS suppressed):', e);
+        }
+      } else if (!url || url.startsWith('PASTE_')) {
+        console.log('[CloseClaim] SAVE_CLOSE_CLAIM_URL is still a placeholder — skipping network call. Computed locally:', { closeDateIso, claimTakeTime, initialScore, specialScore, totalScore });
+      } else if (!claimId) {
+        console.log('[CloseClaim] No claim id found on claimData — request was NEVER sent. claimData was:', claimData);
       }
-    } else if (!url || url.startsWith('PASTE_')) {
-      console.log('[CloseClaim] SAVE_CLOSE_CLAIM_URL is still a placeholder — skipping network call. Computed locally:', { closeDateIso, claimTakeTime, initialScore, specialScore, totalScore });
-    } else if (!claimId) {
-      console.log('[CloseClaim] No claim id found on claimData — request was NEVER sent. claimData was:', claimData);
     }
 
     // Reflect locally right away so any open UI (e.g. a future Scoreboard
@@ -7319,7 +7359,12 @@
         selectedClaimData.verificationData = verificationText;
         selectedClaimData.verificationAssignees = payload.verificationAssignees;
         selectedClaimData.verificationTimestamps = payload.verificationTimestamps;
-        if (allOk) selectedClaimData.status = 'Verified';
+        // Forward-only, same guard as updateClaimStatus()/advanceClaimStatus()
+        // — 'Verified' is the last pipeline stage so this can't normally
+        // regress anything, but comparing ranks here rather than assigning
+        // unconditionally keeps this claim's local status in line with the
+        // one "never move backward" rule used everywhere else in the app.
+        if (allOk && _statusRank('Verified') > _statusRank(selectedClaimData.status)) selectedClaimData.status = 'Verified';
       }
       // Clear touchedNow so re-submitting later (e.g. after just changing an
       // assignment elsewhere) doesn't re-stamp this visit's actions again.
