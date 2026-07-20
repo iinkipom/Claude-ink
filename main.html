@@ -2250,25 +2250,38 @@
   }
 
   /* ── FILE PREVIEWS (Step 1 — unlimited) ── */
+  /* NOTE on the ".concat(Array.from(input.files))" pattern below: re-opening
+     a <input type="file"> picker and choosing more files REPLACES
+     input.files with just that new selection — the browser never appends to
+     what was previously picked. Assigning straight from input.files (the
+     old behavior) therefore silently discarded every file chosen in an
+     earlier "Attach" click the moment the user attached one more. Merging
+     with the existing array — plus clearing input.value afterward so
+     re-picking the exact same file still fires change — fixes that for
+     every attach flow in the app (new claim, edit claim, investigation). */
   function handleClaimImagePreviews(input) {
-    claimImageFiles = Array.from(input.files);
+    claimImageFiles = claimImageFiles.concat(Array.from(input.files));
     renderPreviews(claimImageFiles, 'claimImagePreviews', true);
+    input.value = '';
   }
   function handleClaimDocPreviews(input) {
-    claimDocFiles = Array.from(input.files);
+    claimDocFiles = claimDocFiles.concat(Array.from(input.files));
     const wrap = document.getElementById('claimDocPreviews'); wrap.innerHTML = "";
     claimDocFiles.forEach(f => { wrap.innerHTML += `<div class="doc-item">📄 ${f.name}</div>`; });
+    input.value = '';
   }
 
   /* ── FILE PREVIEWS (Edit Mode — unlimited) ── */
   function handleEditImagePreviews(input) {
-    editImageFiles = Array.from(input.files);
+    editImageFiles = editImageFiles.concat(Array.from(input.files));
     renderPreviews(editImageFiles, 'editImagePreviews', true);
+    input.value = '';
   }
   function handleEditDocPreviews(input) {
-    editDocFiles = Array.from(input.files);
+    editDocFiles = editDocFiles.concat(Array.from(input.files));
     const wrap = document.getElementById('editDocPreviews'); wrap.innerHTML = "";
     editDocFiles.forEach(f => { wrap.innerHTML += `<div class="doc-item">📄 ${f.name}</div>`; });
+    input.value = '';
   }
 
   function renderPreviews(filesArray, containerId, isImage) {
@@ -3307,39 +3320,43 @@
   }
 
   // Render previews, persist to investigationImageStore AND to selectedClaimData._photos
-  // so photos survive navigation back to Active Claims and re-opening the same claim
+  // so photos survive navigation back to Active Claims and re-opening the same claim.
+  //
+  // BUGFIX: re-opening the file picker and choosing more pictures REPLACES
+  // input.files with just that new selection — browsers never append to a
+  // previous pick — so this used to wipe the container and overwrite
+  // investigationImageStore[containerId] with ONLY the newest files,
+  // discarding anything attached (or restored from a saved claim) earlier.
+  // Now it merges the new files with whatever was already showing —
+  // pulling from investigationImageStore if this session already populated
+  // it, or straight from the DOM if the pictures currently on screen came
+  // from a re-opened claim's SharePoint photo URLs (restorePreviewsFromUrls)
+  // instead, so either source survives a new attachment.
   function handleInvestigationPreviews(input, containerId) {
     const files = Array.from(input.files);
+    if (!files.length) return; // picker cancelled — leave existing attachments alone
     const container = document.getElementById(containerId);
     if (!container) return;
-    container.innerHTML = '';
+
+    const existingEntries = (investigationImageStore[containerId] && investigationImageStore[containerId].length)
+      ? investigationImageStore[containerId]
+      : Array.from(container.querySelectorAll('img')).map(img => ({ name: img.title || '', dataUrl: img.src }));
+
     const reads = files.map(file => new Promise(resolve => {
       const reader = new FileReader();
-      reader.onload = e => {
-        const dataUrl = e.target.result;
-        const wrap = document.createElement('div');
-        wrap.className = 'preview-item';
-        const img = document.createElement('img');
-        img.src = dataUrl;
-        img.title = file.name;
-        img.style.cursor = 'zoom-in';
-        img.addEventListener('click', function(ev) {
-          ev.stopPropagation();
-          openLightbox(dataUrl);
-        });
-        wrap.appendChild(img);
-        container.appendChild(wrap);
-        resolve({ name: file.name, dataUrl: dataUrl });
-      };
+      reader.onload = e => resolve({ name: file.name, dataUrl: e.target.result });
       reader.readAsDataURL(file);
     }));
-    Promise.all(reads).then(entries => {
+    Promise.all(reads).then(newEntries => {
+      const entries = existingEntries.concat(newEntries);
       investigationImageStore[containerId] = entries;
       // Mirror into selectedClaimData so re-opening the claim can restore photos
       if (selectedClaimData) {
         if (!selectedClaimData._photos) selectedClaimData._photos = {};
         selectedClaimData._photos[containerId] = entries;
       }
+      restorePreviewsFromStore(containerId);
+      input.value = ''; // allow re-picking the same file again later
     });
   }
 
