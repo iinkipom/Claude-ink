@@ -1272,7 +1272,7 @@
   // BELOW — this is currently a placeholder, so submitVerification() will
   // save locally (selectedClaimData) and no-op the network call until you
   // replace it (see the PASTE_ guard in submitVerification()).
-  const SAVE_VERIFICATION_URL = "PASTE_YOUR_VERIFY_CLAIM_URL_HERE";
+  const SAVE_VERIFICATION_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/14/workflows/4099506c8c0044319ea72761cbe85fd4/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=U_O3NrKpHZQsEwTXh91irfkPevtTA7fzF-PZSZJHuj0";
 
   // ── PAGE-LOAD / F5 REFRESH URL ───────────────────────────────────────────
   // Triggered ONCE whenever the browser tab is loaded or reloaded (F5 / Ctrl+R).
@@ -4147,20 +4147,40 @@
 
   /** The confirmed Players (Investigation Step 1) for a claim, as an array
    *  of up to 5 {firstName,lastName,empId} entries (nulls for empty slots).
-   *  Prefers claim._playerSlots (full objects, same session — set by
-   *  confirmPlayers()); falls back to the flat player1..player5 name
-   *  strings claims.js exports after a fresh load / logout. Shared by
-   *  getCurrentUserPlayerSlotInfo() (Evaluate-tab gating) and the Verify
-   *  Claim "select verify person" picker (same pool of people). */
+   *  SAME three-tier priority as loadPlayerRoster()'s own restore logic —
+   *  this used to only check the first two tiers, so a claim whose players
+   *  were only ever recorded as the combined string (tier 3) showed an
+   *  empty "Select player" dropdown on Verify Claim even though the
+   *  Investigation tab could display its roster just fine:
+   *    1. claim._playerSlots (full objects, same session — set by
+   *       confirmPlayers())
+   *    2. flat player1..player5 name strings claims.js exports
+   *    3. a single combined Players/players/_confirmedPlayers
+   *       comma-separated string
+   *  Shared by getCurrentUserPlayerSlotInfo() (Evaluate-tab gating) and the
+   *  Verify Claim "select verify person" picker (same pool of people). */
   function _getClaimPlayerSlots(claim) {
     if (claim && claim._playerSlots && claim._playerSlots.some(Boolean)) return claim._playerSlots;
+
     const slots = [];
     for (let i = 0; i < 5; i++) {
       const raw = claim && (claim[`player${i+1}`] || claim[`Player${i+1}`]) || '';
       const name = typeof raw === 'string' ? raw.trim() : '';
       slots.push(name ? { firstName: name.split(' ')[0] || name, lastName: name.split(' ').slice(1).join(' ') || '', empId: '' } : null);
     }
-    return slots;
+    if (slots.some(Boolean)) return slots;
+
+    const combined = claim && (claim.Players || claim.players || claim._confirmedPlayers) || '';
+    if (combined && typeof combined === 'string') {
+      const names = combined.split(',').map(n => n.trim()).filter(Boolean);
+      const combinedSlots = Array(5).fill(null);
+      names.forEach((name, i) => {
+        if (i < 5) combinedSlots[i] = { firstName: name.split(' ')[0] || name, lastName: name.split(' ').slice(1).join(' ') || '', empId: '' };
+      });
+      return combinedSlots;
+    }
+
+    return slots; // all null — no player data found by any of the three tiers
   }
 
   /* Is the currently logged-in user one of the confirmed Players (Step 1)? */
@@ -7019,19 +7039,14 @@
       window.ACTIVE_CLAIMS_DATABASE = result.ACTIVE_CLAIMS_DATABASE;
       activeClaimsList = result.ACTIVE_CLAIMS_DATABASE;
 
-      // Access control: a Team Leader (on that specific claim) always sees
-      // it; a Player only sees claims where they're the assigned verify
-      // person on at least one action. Same per-claim role check Verify
-      // Claim's workspace itself uses, so what's visible in the queue
-      // always matches what's actually openable.
+      // Visible to every logged-in user, of any userType, for reviewing —
+      // only the ability to ASSIGN a verifier or ACT on an action (attach
+      // evidence / OK-NG) stays restricted to the Team Leader or that
+      // action's assigned Player (see _renderVerifyActionBlock's canAct).
       const queue = activeClaimsList.filter(c => {
         const raw = c.status ?? c.Status ?? c.ClaimStatus ?? c.Claim_Status ?? null;
         const val = raw === null ? '' : (typeof raw === 'object' ? (raw.Value || raw.value || '') : String(raw).trim());
-        if (val !== 'QC Investigated') return false;
-        const role = getCurrentUserRoleOnClaim(c);
-        if (role === 'Team Leader') return true;
-        if (role === 'Player') return _myVerificationAssignments(c).length > 0;
-        return false;
+        return val === 'QC Investigated';
       });
 
       if (!queue.length) {
@@ -7278,14 +7293,12 @@
     const correctiveWrap = document.getElementById('verifyCorrectiveWrap'); correctiveWrap.innerHTML = '';
     const preventiveWrap = document.getElementById('verifyPreventiveWrap'); preventiveWrap.innerHTML = '';
 
-    // Defensive gate — the queue already only lists claims a Player is
-    // assigned on, so this should only trigger via a stale/direct call.
-    if (!role) {
-      correctiveWrap.innerHTML = '<p style="font-size:12px;color:var(--charcoal-soft);">You are not the Team Leader or an assigned verify person for this claim.</p>';
-      preventiveWrap.innerHTML = '';
-      document.getElementById('verifyStatusMsg').textContent = '';
-      return;
-    }
+    // Every userType can open a claim here to review it — role only
+    // controls what's INTERACTIVE below (assign picker, evidence attach,
+    // OK/NG), via _renderVerifyActionBlock's canAct — so there's no
+    // access gate on opening the workspace itself, just role === null for
+    // anyone who isn't the Team Leader or an assigned Player, which
+    // correctly renders every action read-only for them.
 
     const verifyImgRaw = claim.verificationImages || claim.VerificationImages || '';
     const correctiveByBlock = _extractActionTextByBlock(apText, 'Corrective');
