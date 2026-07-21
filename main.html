@@ -6599,11 +6599,9 @@
     else if (rawStatus==='QC Investigated')  {statusLabel='INVESTIGATED';  statusClass='status-done';}
     else if (rawStatus.includes('Step 2') || rawStatus.includes('Investigated')) {statusLabel='INVESTIGATING'; statusClass='status-investigating';}
     else if (rawStatus !== '')               {statusLabel=rawStatus.toUpperCase(); statusClass='status-new';}
-    // VerifyStatus is a SEPARATE column from Status (see submitVerification())
-    // — Status caps at 'QC Investigated' and never becomes 'Verified' itself,
-    // so this overrides the badge above once verification is actually done.
-    const verifyStatusRaw = resolveField(claim, ['verifyStatus','VerifyStatus'], '');
-    if (verifyStatusRaw === 'Verified') { statusLabel='VERIFIED'; statusClass='status-verified'; }
+    // Active Claims Queue intentionally caps out at INVESTIGATED — VerifyStatus
+    // (a separate column, see submitVerification()) is shown on the Verify
+    // Claim page instead, not overlaid onto this badge.
 
     var shopVal='—';
     var _shopRaw = claim.shopConcerned || claim.ShopConcerned || claim.ClaimShop || claim.claimShop || '';
@@ -7066,17 +7064,15 @@
       // evidence / OK-NG) stays restricted to the Team Leader or that
       // action's assigned Player (see _renderVerifyActionBlock's canAct).
       //
-      // Status alone can't tell "awaiting verification" from "already
-      // verified" anymore — it stays at 'QC Investigated' forever once
-      // Investigation finishes (see CLAIM_STATUS_PIPELINE's comment), so a
-      // fully-verified claim is excluded here by checking the SEPARATE
-      // VerifyStatus field/column instead.
+      // This queue lists every claim that has REACHED verification (Status
+      // === 'QC Investigated'), whether or not it's already been fully
+      // verified — a verified claim stays visible here (with a VERIFIED
+      // badge, see below) so it can still be reopened for review, instead
+      // of disappearing once done.
       const queue = activeClaimsList.filter(c => {
         const raw = c.status ?? c.Status ?? c.ClaimStatus ?? c.Claim_Status ?? null;
         const val = raw === null ? '' : (typeof raw === 'object' ? (raw.Value || raw.value || '') : String(raw).trim());
-        if (val !== 'QC Investigated') return false;
-        const verifyStatusVal = resolveField(c, ['verifyStatus', 'VerifyStatus'], '');
-        return verifyStatusVal !== 'Verified';
+        return val === 'QC Investigated';
       });
 
       if (!queue.length) {
@@ -7101,6 +7097,10 @@
         const apText = resolveField(claim, ['actionPlan', 'ActionPlan', 'action_plan'], '');
         const correctiveCount = Object.keys(_extractActionTextByBlock(apText, 'Corrective')).length;
         const preventiveCount = Object.keys(_extractActionTextByBlock(apText, 'Preventive')).length;
+        const verifyStatusVal = resolveField(claim, ['verifyStatus', 'VerifyStatus'], '');
+        const verifyBadgeHtml = verifyStatusVal === 'Verified'
+          ? '<span class="status-badge status-verified">VERIFIED</span>'
+          : '<span class="status-badge status-done">QC INVESTIGATED</span>';
 
         const tr = document.createElement('tr');
         tr.style.cursor = 'pointer';
@@ -7112,7 +7112,7 @@
           <td style="font-size:11px;white-space:nowrap;">${closeDateRaw ? formatDateDisplay(closeDateRaw) : '—'}</td>
           <td style="font-size:11px;text-align:center;">${correctiveCount || '—'}</td>
           <td style="font-size:11px;text-align:center;">${preventiveCount || '—'}</td>
-          <td><span class="status-badge status-done">QC INVESTIGATED</span></td>
+          <td>${verifyBadgeHtml}</td>
         `;
         tbody.appendChild(tr);
       });
