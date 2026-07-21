@@ -1213,9 +1213,24 @@
   // Flow's JSON schema exactly:
   //   {
   //     id:                        string  — Microsoft List Item ID
-  //     status:                    string  — echoed as-is unless every
-  //                                           action just got marked OK, in
-  //                                           which case it's "Verified"
+  //     status:                    string  — echoed back UNCHANGED (the
+  //                                           existing investigation-pipeline
+  //                                           Status column, e.g. "QC
+  //                                           Investigated"). Verification no
+  //                                           longer touches this column at
+  //                                           all — see verifyStatus below.
+  //     verifyStatus:              string  — "Verified" once every
+  //                                           Corrective/Preventive action on
+  //                                           the claim has been marked OK,
+  //                                           otherwise "Pending". This is a
+  //                                           SEPARATE SharePoint column
+  //                                           (e.g. "VerifyStatus") from
+  //                                           Status — add a matching
+  //                                           mapping (verifyStatus <-
+  //                                           VerifyStatus) in the "Select"
+  //                                           action that builds claims.js,
+  //                                           next to the existing status
+  //                                           mapping.
   //     verificationData:          string  — "[Corrective N] OK/NG: reason"
   //                                           per action, same convention
   //                                           as ActionPlan
@@ -3081,7 +3096,12 @@
      only ever moves status FORWARD through this pipeline, never backward.
      Editing and re-saving an earlier tab on an already-completed claim no
      longer touches its status at all. */
-  const CLAIM_STATUS_PIPELINE = ['', 'Investigating', 'Finding Risk', 'Inspectioning', 'Trouble Analyzing', 'Meeting With Shop', 'QC Investigated', 'Verified'];
+  // 'Verified' deliberately isn't in this pipeline — Status stays capped at
+  // 'QC Investigated' once Investigation finishes. Verification's outcome
+  // lives in its own separate VerifyStatus column/field instead (see
+  // submitVerification()), so it can't collide with or downgrade this
+  // pipeline, and Status keeps meaning "how far Investigation got."
+  const CLAIM_STATUS_PIPELINE = ['', 'Investigating', 'Finding Risk', 'Inspectioning', 'Trouble Analyzing', 'Meeting With Shop', 'QC Investigated'];
   function _statusRank(status) {
     const idx = CLAIM_STATUS_PIPELINE.indexOf((status || '').toString().trim());
     return idx === -1 ? 0 : idx;
@@ -4141,7 +4161,6 @@
         : String(rawStat).trim();
     return statusVal === 'Investigated'
       || statusVal === 'QC Investigated'
-      || statusVal === 'Verified'
       || statusVal.includes('Investigated');
   }
 
@@ -6514,7 +6533,6 @@
       || statusVal === 'Trouble Analyzing'
       || statusVal === 'Meeting With Shop'
       || statusVal === 'QC Investigated'
-      || statusVal === 'Verified'
       || statusVal.includes('Step 2')
       || statusVal.includes('Investigated'));
     if (alreadyStarted) {
@@ -6579,9 +6597,13 @@
     else if (rawStatus==='Trouble Analyzing'){statusLabel='ANALYZING';     statusClass='status-analyzing';}
     else if (rawStatus==='Meeting With Shop'){statusLabel='MEETING';       statusClass='status-meeting';}
     else if (rawStatus==='QC Investigated')  {statusLabel='INVESTIGATED';  statusClass='status-done';}
-    else if (rawStatus==='Verified')         {statusLabel='VERIFIED';      statusClass='status-verified';}
     else if (rawStatus.includes('Step 2') || rawStatus.includes('Investigated')) {statusLabel='INVESTIGATING'; statusClass='status-investigating';}
     else if (rawStatus !== '')               {statusLabel=rawStatus.toUpperCase(); statusClass='status-new';}
+    // VerifyStatus is a SEPARATE column from Status (see submitVerification())
+    // — Status caps at 'QC Investigated' and never becomes 'Verified' itself,
+    // so this overrides the badge above once verification is actually done.
+    const verifyStatusRaw = resolveField(claim, ['verifyStatus','VerifyStatus'], '');
+    if (verifyStatusRaw === 'Verified') { statusLabel='VERIFIED'; statusClass='status-verified'; }
 
     var shopVal='—';
     var _shopRaw = claim.shopConcerned || claim.ShopConcerned || claim.ClaimShop || claim.claimShop || '';
@@ -7043,10 +7065,18 @@
       // only the ability to ASSIGN a verifier or ACT on an action (attach
       // evidence / OK-NG) stays restricted to the Team Leader or that
       // action's assigned Player (see _renderVerifyActionBlock's canAct).
+      //
+      // Status alone can't tell "awaiting verification" from "already
+      // verified" anymore — it stays at 'QC Investigated' forever once
+      // Investigation finishes (see CLAIM_STATUS_PIPELINE's comment), so a
+      // fully-verified claim is excluded here by checking the SEPARATE
+      // VerifyStatus field/column instead.
       const queue = activeClaimsList.filter(c => {
         const raw = c.status ?? c.Status ?? c.ClaimStatus ?? c.Claim_Status ?? null;
         const val = raw === null ? '' : (typeof raw === 'object' ? (raw.Value || raw.value || '') : String(raw).trim());
-        return val === 'QC Investigated';
+        if (val !== 'QC Investigated') return false;
+        const verifyStatusVal = resolveField(c, ['verifyStatus', 'VerifyStatus'], '');
+        return verifyStatusVal !== 'Verified';
       });
 
       if (!queue.length) {
@@ -7386,11 +7416,19 @@
       }
 
       const verificationText = vData.join('\n\n');
-      // Only advance to "Verified" once EVERY action on the claim has been
-      // marked OK — a single NG (or anything still undecided) keeps the
-      // claim at its current status so it stays visible in this queue.
+      // "Verified" lives in its own VerifyStatus column/field, kept
+      // separate from the investigation Status column (which stays
+      // capped at 'QC Investigated' and is echoed back unchanged below —
+      // see CLAIM_STATUS_PIPELINE's comment for why). VerifyStatus simply
+      // reflects "are ALL actions on this claim currently marked OK" as of
+      // THIS submission — not a forward-only pipeline stage, so it's
+      // allowed to move back to 'Pending' too if someone corrects an
+      // action from OK back to NG later; a single NG (or anything still
+      // undecided) keeps it at 'Pending' so the claim stays visible in
+      // this queue.
       const allOk = totalBlocks > 0 && okBlocks === totalBlocks;
-      const newStatus = allOk ? 'Verified' : ((selectedClaimData && selectedClaimData.status) || 'QC Investigated');
+      const verifyStatus = allOk ? 'Verified' : 'Pending';
+      const echoedStatus = (selectedClaimData && selectedClaimData.status) || 'QC Investigated';
 
       // Accumulated audit trail — "FirstName LastName, Subject1|Subject2,
       // DD/MM/YY HH:MM:SS" appended as one new line per submission, only
@@ -7412,7 +7450,8 @@
       // resulting links into VerificationImages (never the base64 itself).
       const payload = {
         id: selectedClaimId.toString(),
-        status: newStatus,
+        status: echoedStatus,
+        verifyStatus: verifyStatus,
         verificationData: verificationText,
         verificationAssignees: JSON.stringify(assignees),
         verificationTimestamps: JSON.stringify(timestamps),
@@ -7433,12 +7472,7 @@
         selectedClaimData.verificationTimestamps = payload.verificationTimestamps;
         selectedClaimData.verificationVideo = payload.verificationVideo;
         selectedClaimData.verificationLog = verificationLog;
-        // Forward-only, same guard as updateClaimStatus()/advanceClaimStatus()
-        // — 'Verified' is the last pipeline stage so this can't normally
-        // regress anything, but comparing ranks here rather than assigning
-        // unconditionally keeps this claim's local status in line with the
-        // one "never move backward" rule used everywhere else in the app.
-        if (allOk && _statusRank('Verified') > _statusRank(selectedClaimData.status)) selectedClaimData.status = 'Verified';
+        selectedClaimData.verifyStatus = verifyStatus; // separate field from status — see comment above
       }
       // Clear touchedNow so re-submitting later (e.g. after just changing an
       // assignment elsewhere) doesn't re-stamp this visit's actions again.
