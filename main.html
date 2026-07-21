@@ -7136,14 +7136,14 @@
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const effReached = !!(eff && new Date(eff) <= today);
     const dueReached = !!(due && new Date(due) <= today);
-    const readyBadge = (!eff && !due)
+    const key = `${type}_${num}`;
+    const state = verifyState[key] || {};
+    const dateBadge = (!eff && !due)
       ? '<span class="status-badge verify-ready-badge" style="background:var(--ivory-deep); color:var(--charcoal-soft);">NO DATE SET</span>'
       : (effReached || dueReached)
         ? '<span class="status-badge verify-ready-badge status-active">READY TO VERIFY</span>'
         : '<span class="status-badge verify-ready-badge" style="background:#fff8e0; color:#886600; border:1px solid #e8d080;">NOT YET DUE</span>';
-
-    const key = `${type}_${num}`;
-    const state = verifyState[key] || {};
+    const readyBadge = state.result ? '<span class="status-badge status-verified">VERIFIED</span>' : dateBadge;
     const containerId = `verifyPrev_${type}_${num}`;
     const isTeamLeader = role === 'Team Leader';
     const canAct = isTeamLeader || (role === 'Player' && _myVerificationAssignments(selectedClaimData).includes(key));
@@ -7203,7 +7203,7 @@
     wrap.innerHTML = `
       <div class="action-header">
         <span>${type} Action #${num}</span>
-        ${readyBadge}
+        <span id="verifyReadyBadge_${key}" data-date-badge="${escapeHtml(dateBadge)}">${readyBadge}</span>
       </div>
       <div style="font-size:13px; color:var(--charcoal); margin-bottom:10px; white-space:pre-wrap;">${escapeHtml(entry.text || '(no description recorded)')}</div>
       <div style="display:flex; gap:16px; flex-wrap:wrap; font-size:11px; color:var(--charcoal-soft); margin-bottom:12px;">
@@ -7268,6 +7268,15 @@
     }
     const reasonWrap = document.getElementById(`verifyReason_${type}_${num}`);
     if (reasonWrap) reasonWrap.classList.toggle('hidden', verifyState[key].result !== 'NG');
+
+    // Header badge flips to VERIFIED the instant an action is marked OK/NG
+    // (and back to its date-based badge if the pick is cleared again).
+    const badgeEl = document.getElementById(`verifyReadyBadge_${key}`);
+    if (badgeEl) {
+      badgeEl.innerHTML = verifyState[key].result
+        ? '<span class="status-badge status-verified">VERIFIED</span>'
+        : (badgeEl.dataset.dateBadge || '');
+    }
   }
 
   function closeVerifyWorkspace() {
