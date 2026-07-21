@@ -6140,7 +6140,7 @@
     block.innerHTML = `
       <div class="action-header">
         <span style="font-size:13px; color:var(--red); font-weight:800;">Inspection Detail ${icon}</span>
-        <button type="button" onclick="document.getElementById('inspBlock_${n}').remove()">Remove</button>
+        <button type="button" onclick="removeInspectionBlock(${n})">Remove</button>
       </div>
       <div class="form-group" style="margin-bottom:10px;">
         <label style="font-size:11px;">Inspection Result Detail</label>
@@ -6153,6 +6153,52 @@
       </div>
     `;
     container.appendChild(block);
+  }
+
+  /** Removes one Inspection Detail block AND renumbers every block above it
+   *  down by one — both the visible "Inspection Detail N" label/icon and
+   *  every element id that encodes N (inspText_N, inspImg_N + its onchange,
+   *  inspPrev_N, plus any already-attached photos sitting in
+   *  investigationImageStore under the old inspPrev_N key) — so the freed
+   *  number is genuinely reused by the next "+ Addition" instead of the
+   *  running counter only ever climbing (e.g. delete #2 of 2, then add,
+   *  used to produce #3 instead of a new #2). Processed in ascending order
+   *  so each shift's target slot is already empty by the time it's filled. */
+  function removeInspectionBlock(n) {
+    const block = document.getElementById(`inspBlock_${n}`);
+    if (block) block.remove();
+
+    for (let i = n + 1; i <= inspectionBlockCount; i++) {
+      const from = i, to = i - 1;
+      const fromBlock = document.getElementById(`inspBlock_${from}`);
+      if (!fromBlock) continue;
+      fromBlock.id = `inspBlock_${to}`;
+
+      const icon = circledNumbers[to - 1] || `(${to})`;
+      const header = fromBlock.querySelector('.action-header span');
+      if (header) header.textContent = `Inspection Detail ${icon}`;
+      const removeBtn = fromBlock.querySelector('.action-header button');
+      if (removeBtn) removeBtn.setAttribute('onclick', `removeInspectionBlock(${to})`);
+
+      const textarea = fromBlock.querySelector(`#inspText_${from}`);
+      if (textarea) textarea.id = `inspText_${to}`;
+
+      const fileInput = fromBlock.querySelector(`#inspImg_${from}`);
+      if (fileInput) {
+        fileInput.id = `inspImg_${to}`;
+        fileInput.setAttribute('onchange', `handleInvestigationPreviews(this,'inspPrev_${to}')`);
+      }
+
+      const previewDiv = fromBlock.querySelector(`#inspPrev_${from}`);
+      if (previewDiv) previewDiv.id = `inspPrev_${to}`;
+
+      if (investigationImageStore[`inspPrev_${from}`]) {
+        investigationImageStore[`inspPrev_${to}`] = investigationImageStore[`inspPrev_${from}`];
+        delete investigationImageStore[`inspPrev_${from}`];
+      }
+    }
+
+    inspectionBlockCount--;
   }
 
   /* ── ACTION BLOCKS (Corrective / Preventive — unlimited, with Due Date) ── */
