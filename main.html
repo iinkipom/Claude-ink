@@ -117,6 +117,10 @@
   </div>
 
   <div id="pagProfile" class="page-body">
+    <div id="profileViewingBanner" class="hidden" style="display:flex; align-items:center; justify-content:space-between; gap:12px; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); padding:10px 16px; margin-bottom:14px; font-size:13px;">
+      <span>👀 Viewing <strong id="profileViewingName">—</strong>'s profile</span>
+      <button type="button" class="action-btn" onclick="backToMyProfile()">← Back to My Profile</button>
+    </div>
      <div class="profile-banner">
       <div class="profile-avatar-wrap"><div class="profile-avatar" id="displayInitials">?</div></div>
       <div class="profile-info">
@@ -2072,11 +2076,67 @@
    *  landed in it, rather than every claim counting equally. Week view
    *  has no smaller sub-unit to bucket by, so it stays a flat average of
    *  every evaluation in that week. */
+  /** null = the Profile page shows the logged-in user (default). Set by
+   *  viewPlayerProfile() when a roster card is clicked from the Scoreboard,
+   *  so the Profile page and its radar chart temporarily target a teammate
+   *  instead — without touching localStorage's real userProfile, which
+   *  every other feature (claim submission, evaluation eligibility, verify
+   *  assignment, etc.) still reads directly and must keep seeing the real
+   *  logged-in user. */
+  let profileViewTarget = null;
+  function _activeProfile() {
+    return profileViewTarget || JSON.parse(localStorage.getItem('userProfile') || '{}');
+  }
+
+  /** Populates the Profile page's identity card + avatar showcase for
+   *  whichever profile is passed in — the logged-in user (DOMContentLoaded)
+   *  or a teammate being viewed (viewPlayerProfile()). Does NOT touch the
+   *  sidebar identity, which always reflects the real logged-in user. */
+  function _renderProfileCard(profile) {
+    const firstName = profile.firstName || ''; const lastName = profile.lastName || '';
+    const fullName  = (firstName + ' ' + lastName).trim() || 'Unknown User';
+    const initials  = ((firstName[0]||'') + (lastName[0]||'')).toUpperCase() || '?';
+
+    document.getElementById('displayInitials').textContent  = initials;
+    document.getElementById('displayName').textContent      = fullName;
+    document.getElementById('displayEmail').textContent     = profile.email    || '—';
+    document.getElementById('displayUserType').textContent  = profile.userType || '—';
+    document.getElementById('displayEmpId').textContent     = profile.empId    || '—';
+    document.getElementById('displaySection').textContent   = profile.section  || '—';
+    document.getElementById('displayPosition').textContent  = profile.position || '—';
+
+    const _avatarNameEl = document.getElementById('avatarPlayerName');
+    const _avatarTagEl  = document.getElementById('avatarPlayerTag');
+    if (_avatarNameEl) _avatarNameEl.textContent = fullName;
+    if (_avatarTagEl)  _avatarTagEl.textContent  = 'Smart Quality · #' + (profile.empId || '—');
+
+    try { initPlayerAvatar(firstName); } catch (e) { console.warn('[Avatar] init skipped:', e); }
+  }
+
+  /** Called when a Scoreboard roster card is clicked: switches the Profile
+   *  page to show that teammate's identity card + evaluated performance
+   *  radar instead of the logged-in user's own, and navigates there. */
+  function viewPlayerProfile(empId) {
+    const db = (typeof USER_DATABASE !== 'undefined' && Array.isArray(USER_DATABASE)) ? USER_DATABASE : [];
+    const target = db.find(u => String(u.empId || '').trim() === String(empId || '').trim());
+    if (!target) return;
+    profileViewTarget = target;
+    showPage('profile', false, true);
+  }
+
+  /** Reverts the Profile page back to the logged-in user's own identity +
+   *  radar — the "← Back to My Profile" button shown while viewing a
+   *  teammate. */
+  function backToMyProfile() {
+    profileViewTarget = null;
+    showPage('profile');
+  }
+
   /** Evaluation records (Evaluates.js rows) belonging to the logged-in user,
    *  regardless of period — shared by computeRadarScoresForPeriod() and
    *  computeRadarScoresForBucket() so both start from the same filtered set. */
   function _myEvaluationRecords() {
-    const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
+    const profile = _activeProfile();
     const myEmpId     = String(profile.empId || '').trim();
     const myFirstName = String(profile.firstName || '').trim().toLowerCase();
     const db = (typeof EVALUATES_DATABASE !== 'undefined' && Array.isArray(EVALUATES_DATABASE)) ? EVALUATES_DATABASE : [];
@@ -2272,24 +2332,11 @@
     const firstName = profile.firstName || ''; const lastName = profile.lastName || '';
     const fullName  = (firstName + ' ' + lastName).trim() || 'Unknown User';
     const initials  = ((firstName[0]||'') + (lastName[0]||'')).toUpperCase() || '?';
-
-    document.getElementById('displayInitials').textContent  = initials;
-    document.getElementById('displayName').textContent      = fullName;
-    document.getElementById('displayEmail').textContent     = profile.email    || '—';
-    document.getElementById('displayUserType').textContent  = profile.userType || '—';
-    document.getElementById('displayEmpId').textContent     = profile.empId    || '—';
-    document.getElementById('displaySection').textContent   = profile.section  || '—';
-    document.getElementById('displayPosition').textContent  = profile.position || '—';
     document.getElementById('sidebarInitial').textContent   = initials;
     document.getElementById('sidebarName').textContent      = fullName;
     document.getElementById('sidebarRole').textContent      = profile.userType || '—';
 
-    const _avatarNameEl = document.getElementById('avatarPlayerName');
-    const _avatarTagEl  = document.getElementById('avatarPlayerTag');
-    if (_avatarNameEl) _avatarNameEl.textContent = fullName;
-    if (_avatarTagEl)  _avatarTagEl.textContent  = 'Smart Quality · #' + (profile.empId || '—');
-
-    try { initPlayerAvatar(firstName); } catch (e) { console.warn('[Avatar] init skipped:', e); }
+    _renderProfileCard(profile);
     try { initPeriodToggle(); } catch (e) { console.warn('[Radar] toggle init skipped:', e); }
     setActivePeriod('year');
 
@@ -2319,7 +2366,21 @@
     teamGraph:    ['Team Graph',                'Total Point vs Target Point, visualized by period']
   };
 
-  function showPage(key, skipHistory = false) {
+  function showPage(key, skipHistory = false, keepProfileView = false) {
+    if (key === 'profile') {
+      if (!keepProfileView) profileViewTarget = null;
+      const target = _activeProfile();
+      _renderProfileCard(target);
+      const banner = document.getElementById('profileViewingBanner');
+      if (banner) {
+        banner.classList.toggle('hidden', !profileViewTarget);
+        if (profileViewTarget) {
+          const nm = document.getElementById('profileViewingName');
+          if (nm) nm.textContent = `${target.firstName || ''} ${target.lastName || ''}`.trim() || 'this player';
+        }
+      }
+      setActivePeriod(_currentRadarPeriod || 'year');
+    }
     Object.values(pages).forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
     const targetPage = document.getElementById(pages[key]);
     // Clear the inline override instead of forcing 'block' — lets each
@@ -4963,8 +5024,9 @@
       const section   = u.section || '—';
       const avatarSrc = AVATAR_ASSET_PATH + resolveAvatarFileName(u.firstName);
       const fallback  = AVATAR_ASSET_PATH + AVATAR_FALLBACK_FILE;
+      const empIdAttr = escapeHtml(String(u.empId || ''));
       return `
-        <div class="sb-roster-player-card ${roleClass}">
+        <div class="sb-roster-player-card ${roleClass}" style="cursor:pointer;" onclick="viewPlayerProfile('${empIdAttr}')" title="View ${escapeHtml(firstName)}'s profile">
           <div class="sb-roster-card-photo-area">
             <span class="sb-roster-card-spotlight"></span>
             <img class="sb-roster-card-photo" src="${avatarSrc}"
