@@ -2202,58 +2202,134 @@ textarea.form-control {
   opacity: 0.97;
 }
 
-/* ---- Top Scorer of the month: gold/sapphire "legendary" frame ----
-   Whoever's monthly overall score is BOTH the section's highest AND at
-   least 80 gets this frame instead of the normal cream card — see
-   topScorerEmpIds in renderScoreboard(). */
-.fut-card.is-topscorer {
-  background: linear-gradient(165deg, #1b2350 0%, #0d1230 45%, #2a1f52 100%);
-  border: 2px solid #f0c96a;
-  box-shadow: 0 0 0 1px rgba(240,201,106,0.35), 0 10px 26px rgba(0,0,0,0.55), 0 0 26px rgba(120,150,255,0.35);
+/* =================================================================
+   TIERED SCORE FRAMES — 4 FUT-style shield card designs, one per
+   monthly-score band, applied to Player/Team Leader cards only
+   (Mentors don't self-evaluate, so their card always stays the plain
+   default design — see _futTier()/tierClass in _buildRosterCard()):
+     50-69  tier50  "50 Score Up Frame"  — silver
+     70-84  tier70  "70 Score Up Frame"  — gold
+     85-94  tier85  "85 Score Up Frame"  — icon (white/gold marble)
+     95+    tier95  "95 Score Up Frame"  — special (deep red)
+   Below 50 gets no tier class and keeps the plain cream card.
+
+   All 4 share one shield silhouette (single top-center notch, straight
+   sides, a shallow bottom point) via clip-path path() — exact px coords
+   for this card's fixed 140x220 box. A plain border/box-shadow won't
+   follow a clipped shape, so the frame edge + glow are both done as a
+   multi-direction drop-shadow filter stack instead (filter respects
+   the element's actual rendered silhouette; border/box-shadow do not).
+   The point is kept shallow (only the last 10px) rather than a dramatic
+   spike, so the stat grid's bottom row never gets clipped by the taper.
+   ================================================================= */
+.fut-card[class*="tier"] {
+  --fut-shield: path('M0,4 C0,1.8 1.8,0 4,0 L58,0 L70,9 L82,0 L136,0 C138.2,0 140,1.8 140,4 L140,210 L70,220 L0,210 Z');
+  clip-path: var(--fut-shield);
+  border: none;
+  border-radius: 0;
 }
-.fut-card.is-topscorer::before {
-  content: '';
-  position: absolute;
-  inset: 0;
+.fut-card[class*="tier"] .fut-card-topbar { margin-top: 9px; }
+
+/* ---- 50 Score Up Frame — silver ---- */
+.fut-card.tier50 {
   background:
-    radial-gradient(circle at 25% 15%, rgba(120,170,255,0.35) 0%, transparent 45%),
-    radial-gradient(circle at 80% 75%, rgba(240,201,106,0.3) 0%, transparent 50%);
-  pointer-events: none;
-  animation: futTopscorerShimmer 3.2s ease-in-out infinite;
+    linear-gradient(35deg, transparent 40%, rgba(255,255,255,0.35) 44%, transparent 48%),
+    linear-gradient(125deg, transparent 55%, rgba(255,255,255,0.22) 59%, transparent 63%),
+    linear-gradient(75deg, transparent 70%, rgba(0,0,0,0.10) 74%, transparent 78%),
+    linear-gradient(160deg, #f4f5f7 0%, #d7dade 30%, #b9bec4 55%, #9aa0a8 80%, #7d838c 100%);
+  filter:
+    drop-shadow(1px 0 0 #9aa0a8) drop-shadow(-1px 0 0 #9aa0a8)
+    drop-shadow(0 1px 0 #9aa0a8) drop-shadow(0 -1px 0 #9aa0a8)
+    drop-shadow(0 8px 14px rgba(0,0,0,0.45))
+    drop-shadow(0 0 8px rgba(200,205,212,0.5));
 }
-@keyframes futTopscorerShimmer {
-  0%, 100% { opacity: 0.7; }
-  50%      { opacity: 1; }
+.fut-card.tier50:hover {
+  filter:
+    drop-shadow(1.5px 0 0 #c8ccd1) drop-shadow(-1.5px 0 0 #c8ccd1)
+    drop-shadow(0 1.5px 0 #c8ccd1) drop-shadow(0 -1.5px 0 #c8ccd1)
+    drop-shadow(0 12px 20px rgba(0,0,0,0.5))
+    drop-shadow(0 0 14px rgba(200,205,212,0.7));
 }
-.fut-card.is-topscorer:hover {
-  border-color: #ffdd8a;
-  box-shadow: 0 0 0 1px rgba(255,221,138,0.5), 0 16px 34px rgba(0,0,0,0.6), 0 0 34px rgba(120,150,255,0.5);
+.fut-card.tier50 .fut-card-oa-role { color: #5b6068; }
+.fut-card.tier50 .fut-card-badge-position { background: #5b6068; }
+.fut-card.tier50 .fut-card-name { border-top-color: rgba(91,96,104,0.35); }
+
+/* ---- 70 Score Up Frame — gold ---- */
+.fut-card.tier70 {
+  background:
+    linear-gradient(35deg, transparent 40%, rgba(255,255,255,0.3) 44%, transparent 48%),
+    linear-gradient(125deg, transparent 55%, rgba(255,255,255,0.22) 59%, transparent 63%),
+    linear-gradient(75deg, transparent 70%, rgba(90,50,0,0.16) 74%, transparent 78%),
+    linear-gradient(160deg, #fff3c4 0%, #f0c94a 30%, #d9a52e 55%, #b8811c 80%, #8a6014 100%);
+  filter:
+    drop-shadow(1px 0 0 #caa04a) drop-shadow(-1px 0 0 #caa04a)
+    drop-shadow(0 1px 0 #caa04a) drop-shadow(0 -1px 0 #caa04a)
+    drop-shadow(0 8px 14px rgba(0,0,0,0.45))
+    drop-shadow(0 0 10px rgba(240,201,106,0.5));
 }
-.fut-card.is-topscorer .fut-card-oa-num { color: #fff8e6; }
-.fut-card.is-topscorer .fut-card-oa-role,
-.fut-card.is-topscorer .fut-card-badge-position { color: #0d1230; background: #f0c96a; }
-.fut-card.is-topscorer .fut-card-name { color: #f0c96a; border-top-color: rgba(240,201,106,0.35); }
-.fut-card.is-topscorer .fut-card-badge-section { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.75); border-color: rgba(255,255,255,0.2); }
-.fut-card.is-topscorer .fut-stat-label { color: rgba(255,255,255,0.55); }
-.fut-card.is-topscorer .fut-stat-val { color: #fff8e6; }
-.fut-card.is-topscorer .fut-card-stats { border-top-color: rgba(240,201,106,0.3); }
-.fut-topscorer-ribbon {
-  position: absolute;
-  top: 6px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 8px;
-  font-weight: 800;
-  letter-spacing: 0.4px;
-  color: #0d1230;
-  background: #f0c96a;
-  padding: 2px 8px;
-  border-radius: var(--r-full);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-  white-space: nowrap;
-  z-index: 2;
+.fut-card.tier70:hover {
+  filter:
+    drop-shadow(1.5px 0 0 #ffdd8a) drop-shadow(-1.5px 0 0 #ffdd8a)
+    drop-shadow(0 1.5px 0 #ffdd8a) drop-shadow(0 -1.5px 0 #ffdd8a)
+    drop-shadow(0 12px 20px rgba(0,0,0,0.5))
+    drop-shadow(0 0 16px rgba(255,221,138,0.7));
 }
-.fut-card.is-topscorer .fut-card-topbar { margin-top: 10px; }
+.fut-card.tier70 .fut-card-oa-role { color: #7a5210; }
+.fut-card.tier70 .fut-card-badge-position { background: #7a5210; }
+.fut-card.tier70 .fut-card-name { border-top-color: rgba(122,82,16,0.35); }
+
+/* ---- 85 Score Up Frame — icon (white/gold marble) ---- */
+.fut-card.tier85 {
+  background:
+    linear-gradient(35deg, transparent 42%, rgba(240,201,106,0.55) 46%, rgba(240,201,106,0.55) 52%, transparent 56%),
+    repeating-linear-gradient(60deg, transparent 0 8px, rgba(120,120,120,0.06) 8px 9px),
+    linear-gradient(160deg, #ffffff 0%, #f3f3f0 25%, #e8e4da 50%, #d9cfb0 75%, #cdbb7e 100%);
+  filter:
+    drop-shadow(1px 0 0 #d4af37) drop-shadow(-1px 0 0 #d4af37)
+    drop-shadow(0 1px 0 #d4af37) drop-shadow(0 -1px 0 #d4af37)
+    drop-shadow(0 8px 14px rgba(0,0,0,0.4))
+    drop-shadow(0 0 10px rgba(212,175,55,0.5));
+}
+.fut-card.tier85:hover {
+  filter:
+    drop-shadow(1.5px 0 0 #e8c765) drop-shadow(-1.5px 0 0 #e8c765)
+    drop-shadow(0 1.5px 0 #e8c765) drop-shadow(0 -1.5px 0 #e8c765)
+    drop-shadow(0 12px 20px rgba(0,0,0,0.45))
+    drop-shadow(0 0 16px rgba(212,175,55,0.7));
+}
+.fut-card.tier85 .fut-card-oa-num { color: #5b4a1e; }
+.fut-card.tier85 .fut-card-oa-role { color: #8a6d1e; }
+.fut-card.tier85 .fut-card-badge-position { background: #8a6d1e; }
+.fut-card.tier85 .fut-card-name { color: #5b4a1e; border-top-color: rgba(138,109,30,0.35); }
+.fut-card.tier85 .fut-stat-val { color: #5b4a1e; }
+
+/* ---- 95 Score Up Frame — special (deep red) ---- */
+.fut-card.tier95 {
+  background:
+    linear-gradient(35deg, transparent 42%, rgba(255,70,90,0.5) 46%, rgba(255,70,90,0.5) 50%, transparent 54%),
+    linear-gradient(125deg, transparent 60%, rgba(255,255,255,0.08) 64%, transparent 68%),
+    linear-gradient(160deg, #7a0d24 0%, #5c0a1c 40%, #3d0712 75%, #2a0710 100%);
+  filter:
+    drop-shadow(1px 0 0 #ff2d55) drop-shadow(-1px 0 0 #ff2d55)
+    drop-shadow(0 1px 0 #ff2d55) drop-shadow(0 -1px 0 #ff2d55)
+    drop-shadow(0 8px 14px rgba(0,0,0,0.55))
+    drop-shadow(0 0 12px rgba(255,45,85,0.5));
+}
+.fut-card.tier95:hover {
+  filter:
+    drop-shadow(1.5px 0 0 #ff5c7a) drop-shadow(-1.5px 0 0 #ff5c7a)
+    drop-shadow(0 1.5px 0 #ff5c7a) drop-shadow(0 -1.5px 0 #ff5c7a)
+    drop-shadow(0 12px 20px rgba(0,0,0,0.6))
+    drop-shadow(0 0 18px rgba(255,45,85,0.75));
+}
+.fut-card.tier95 .fut-card-oa-num { color: #fff0ea; }
+.fut-card.tier95 .fut-card-oa-role { color: #ff8fa3; }
+.fut-card.tier95 .fut-card-badge-position { background: #ff2d55; }
+.fut-card.tier95 .fut-card-name { color: #fff0ea; border-top-color: rgba(255,45,85,0.35); }
+.fut-card.tier95 .fut-card-badge-section { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); border-color: rgba(255,255,255,0.2); }
+.fut-card.tier95 .fut-stat-label { color: rgba(255,255,255,0.6); }
+.fut-card.tier95 .fut-stat-val { color: #fff0ea; }
+.fut-card.tier95 .fut-card-stats { border-top-color: rgba(255,45,85,0.3); }
 
 @media (max-width: 420px) {
   .fut-card { width: 108px; height: 178px; }

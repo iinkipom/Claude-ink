@@ -5022,25 +5022,28 @@
     });
 
     // ---- This month's overall score per Player/Team Leader (Mentors don't
-    //      self-evaluate — see EVALUATE_SUBJECTS' appliesTo — so they're
-    //      excluded from scoring/the Top Scorer frame entirely). Whoever's
-    //      score is the section's highest AND reaches 80+ gets the special
-    //      gold "Top Scorer" card frame this month; ties all get it. ----
+    //      self-evaluate — see EVALUATE_SUBJECTS' appliesTo — so their card
+    //      always stays the plain default design, unchanged). Every scored
+    //      Player/Team Leader gets ONE of 4 tiered card frames based on
+    //      where their OWN score falls — not "am I the top scorer", so
+    //      several teammates can share the same tier at once:
+    //        50-69  -> "50 Score Up Frame" (tier50, silver)
+    //        70-84  -> "70 Score Up Frame" (tier70, gold)
+    //        85-94  -> "85 Score Up Frame" (tier85, icon white/gold)
+    //        95+    -> "95 Score Up Frame" (tier95, special red)
+    //      Below 50 keeps the plain default cream card (no tier). ----
     const scoreEligible = [...leaders, ...rosterPlayers];
     const monthlyScoreByEmpId = new Map();
-    let maxMonthlyOverall = -1;
     scoreEligible.forEach(u => {
-      const empId = String(u.empId || '');
       const { overall } = computeMonthlyOverallScoreForUser(u);
-      monthlyScoreByEmpId.set(empId, overall);
-      if (overall > maxMonthlyOverall) maxMonthlyOverall = overall;
+      monthlyScoreByEmpId.set(String(u.empId || ''), overall);
     });
-    const topScorerEmpIds = new Set();
-    if (maxMonthlyOverall >= 80) {
-      scoreEligible.forEach(u => {
-        const empId = String(u.empId || '');
-        if (Math.abs((monthlyScoreByEmpId.get(empId) || 0) - maxMonthlyOverall) < 0.05) topScorerEmpIds.add(empId);
-      });
+    function _futTier(score) {
+      if (score >= 95) return 'tier95';
+      if (score >= 85) return 'tier85';
+      if (score >= 70) return 'tier70';
+      if (score >= 50) return 'tier50';
+      return '';
     }
 
     const ROLE_ABBR = { '4Dx Mentor': 'MT', 'Team Leader': 'TL' };
@@ -5050,9 +5053,9 @@
      *  overall score + role abbreviation top-left, avatar top-right, name +
      *  Position/Section badges below, then the 5 evaluated subjects as a
      *  stat grid (Players/Team Leaders only — Mentors don't self-evaluate,
-     *  so their card omits the stat grid). Whoever is this month's top
-     *  scorer (see topScorerEmpIds above) renders with the gold/blue
-     *  "Top Scorer" frame instead of the normal cream card. */
+     *  so their card omits the stat grid and always stays the default
+     *  design). Scored cards additionally get a tiered shield frame based
+     *  on their own current month's score — see _futTier() above. */
     function _buildRosterCard(u, roleClass) {
       const firstName = u.firstName || 'Unnamed';
       const position  = u.position || '—';
@@ -5063,8 +5066,8 @@
       const userType  = (u.userType || '').trim();
       const roleAbbr  = ROLE_ABBR[userType] || 'PL';
       const isScored  = roleClass !== 'role-mentor';
-      const isTopScorer = isScored && topScorerEmpIds.has(String(u.empId || ''));
       const overall = isScored ? Math.round(monthlyScoreByEmpId.get(String(u.empId || '')) || 0) : null;
+      const tierClass = isScored ? _futTier(overall) : '';
 
       let statsHtml = '';
       if (isScored) {
@@ -5081,8 +5084,7 @@
       }
 
       return `
-        <div class="fut-card sb-roster-player-card ${roleClass}${isTopScorer ? ' is-topscorer' : ''}" style="cursor:pointer;" onclick="viewPlayerProfile('${empIdAttr}')" title="View ${escapeHtml(firstName)}'s profile">
-          ${isTopScorer ? '<div class="fut-topscorer-ribbon">🏆 TOP SCORER</div>' : ''}
+        <div class="fut-card sb-roster-player-card ${roleClass}${tierClass ? ' ' + tierClass : ''}" style="cursor:pointer;" onclick="viewPlayerProfile('${empIdAttr}')" title="View ${escapeHtml(firstName)}'s profile">
           <div class="fut-card-topbar">
             <div class="fut-card-oa">
               <span class="fut-card-oa-num">${overall !== null ? overall : '—'}</span>
