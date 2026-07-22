@@ -5276,9 +5276,11 @@
         html += `
           <div class="sb-period ${hasAny ? '' : 'empty'}">
             <div class="sb-period-num">${labels[i]}</div>
-            <div class="sb-period-row cc"><span class="k">Case</span><span class="v sb-font-digit">${w.issued || 0}</span></div>
-            <div class="sb-period-row cl"><span class="k">Closed</span><span class="v sb-font-digit">${w.closed || 0}</span></div>
-            
+            <div class="sb-period-combined">
+              <div class="sb-period-stat cc"><span class="k">Case</span><span class="v sb-font-digit">${w.issued || 0}</span></div>
+              <div class="sb-period-stat cl"><span class="k">Closed</span><span class="v sb-font-digit">${w.closed || 0}</span></div>
+            </div>
+
             <div class="sb-beam-war ${hasAny ? '' : 'idle'} ${pointWins ? 'point-wins' : 'target-wins'}">
               <div class="sb-beam-labels">
                 <span class="pt">PT ${w.point}</span>

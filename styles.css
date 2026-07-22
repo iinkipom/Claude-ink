@@ -1692,23 +1692,29 @@ textarea.form-control {
 @media (max-width: 900px) { .sb-tally-strip { grid-template-columns: repeat(2, 1fr); } }
 
 .sb-period {
+  width: 295px;
+  height: 128px;
   background: rgba(255,255,255,0.035);
   border: 1px solid rgba(255,255,255,0.07);
   border-radius: var(--r-md);
-  padding: 12px 12px 14px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 6px;
   text-align: center;
 }
 .sb-period-num {
+  align-self: center;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
-  letter-spacing: 1.6px;
+  letter-spacing: 1.4px;
   color: #fff;
   text-transform: uppercase;
-  margin-bottom: 12px;
-  padding: 6px 14px;
+  padding: 4px 12px;
   border-radius: var(--r-full, 999px);
   background: linear-gradient(135deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.04) 100%);
   border: 1px solid rgba(255,255,255,0.18);
@@ -1733,12 +1739,15 @@ textarea.form-control {
   background: rgba(255,255,255,0.3);
   box-shadow: none;
 }
-.sb-period-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; padding: 0 2px; }
-.sb-period-row .k {font-size: 10.5px;font-weight: 700;color: rgb(255 255 255);}
-.sb-period-row .v { font-family: 'Orbitron', var(--font-body); font-weight: 700; font-size: 19px; }
-.sb-period-row.cc .v { color: #ff5b7a; }
-.sb-period-row.cl .v { color: #2bdc8a; }
-.sb-period-row.pt .v { color: #ffd9a0; }
+/* Case + Closed share one line, spaced apart rather than stretched to
+   the box's edges — fits the compact 295×128 footprint while staying
+   easy to read at a glance. */
+.sb-period-combined { display: flex; justify-content: center; align-items: baseline; gap: 28px; }
+.sb-period-stat { display: flex; align-items: baseline; gap: 6px; }
+.sb-period-stat .k { font-size: 10.5px; font-weight: 700; color: rgb(255 255 255); }
+.sb-period-stat .v { font-family: 'Orbitron', var(--font-body); font-weight: 700; font-size: 16px; }
+.sb-period-stat.cc .v { color: #ff5b7a; }
+.sb-period-stat.cl .v { color: #2bdc8a; }
 .sb-period.empty { opacity: 0.4; }
 .sb-period.empty .v { color: rgba(255,255,255,0.25) !important; }
 
@@ -2016,7 +2025,8 @@ textarea.form-control {
    Position/Section badges, then a 5-stat grid for Players/Team Leaders
    (Mentors don't self-evaluate, so theirs shows a "Coach" tag instead). */
 .fut-card {
-  width: 150px;
+  width: 160px;
+  height: 252px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2025,10 +2035,10 @@ textarea.form-control {
   position: relative;
   background: linear-gradient(165deg, #fffdf7 0%, var(--ivory-deep) 100%);
   border: 2px solid #d8c48f;
-  padding: 8px 8px 10px;
+  padding: 8px 8px 8px;
   gap: 4px;
   box-shadow: 0 6px 16px rgba(0,0,0,0.35);
-  transition: transform .45s cubic-bezier(.34,1.56,.64,1), box-shadow .35s ease, border-color .35s ease, width .3s ease;
+  transition: transform .45s cubic-bezier(.34,1.56,.64,1), box-shadow .35s ease, border-color .35s ease;
   flex-shrink: 0;
   cursor: pointer;
 }
@@ -2040,7 +2050,8 @@ textarea.form-control {
 .fut-card-topbar {
   position: relative;
   width: 100%;
-  min-height: 138px;
+  flex: 1;
+  min-height: 0;
   display: flex;
 }
 .fut-card-oa {
@@ -2245,7 +2256,7 @@ textarea.form-control {
 .fut-card.is-topscorer .fut-card-topbar { margin-top: 12px; }
 
 @media (max-width: 420px) {
-  .fut-card { width: 112px; }
+  .fut-card { width: 112px; height: 190px; }
 }
 
 
@@ -2480,9 +2491,6 @@ textarea.form-control {
   .tg-chart-svg { min-height: 280px; }
 }
 
-/* ---- Period card: Target row ---- */
-.sb-period-row.tg .v {color: #bbdfff;}
-
 /* =================================================================
    POWER CRYSTAL DUEL — Point vs Target rendered as two vertical energy
    columns rising from a shared platform (gold = Point, blue = Target).
@@ -2500,7 +2508,6 @@ textarea.form-control {
    ================================================================= */
 
 .sb-beam-war {
-  margin-top: 16px;
   position: relative;
 }
 
@@ -2508,9 +2515,9 @@ textarea.form-control {
 .sb-beam-labels {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   font-family: 'Orbitron', var(--font-body);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.5px;
 }
@@ -2520,7 +2527,7 @@ textarea.form-control {
 /* Track: กรอบของหลอดพลัง */
 .sb-beam-track {
   position: relative;
-  height: 16px;
+  height: 12px;
   display: flex;
   align-items: center;
   border-radius: var(--r-full);
