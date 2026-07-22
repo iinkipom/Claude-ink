@@ -364,16 +364,61 @@ body.sidebar-collapsed .sidebar-edge-toggle { left: 0; }
   padding: 6px 8px; margin-bottom: 30px;
   position: relative; z-index: 1;
 }
+/* Q Flow logomark — same concept as index.html's login-page logo (Q ring +
+   checkmark + arrow tail, rotating ambient glow), scaled down for the
+   sidebar. index.html uses Tailwind's arbitrary-value utilities for this;
+   main.html has no Tailwind, so the same visuals are recreated here as
+   plain CSS instead. */
 .sidebar-logo-icon {
+  position: relative;
   width: 34px; height: 34px;
-  background: var(--red); border-radius: 9px;
+  border-radius: 9px;
+  background: linear-gradient(160deg, var(--red) 0%, #6b0018 100%);
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 12px rgba(218,0,55,0.35); flex-shrink: 0;
+  box-shadow: 0 4px 14px rgba(218,0,55,0.4);
+  flex-shrink: 0;
+  overflow: hidden;
 }
-.sidebar-logo-text {
+.sidebar-logo-icon-glow {
+  position: absolute;
+  width: 150%; height: 150%;
+  background: conic-gradient(from 0deg, transparent 0 280deg, rgba(255,255,255,0.4) 360deg);
+  animation: sidebarLogoSpin 4s linear infinite;
+  opacity: 0.6;
+}
+.sidebar-logo-icon-inner {
+  position: absolute; inset: 1.5px;
+  border-radius: 7px;
+  background: linear-gradient(160deg, var(--red) 0%, #6b0018 100%);
+}
+@keyframes sidebarLogoSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-logo-icon-glow { animation: none; }
+}
+.sidebar-logo-word {
+  display: flex; flex-direction: column; justify-content: center;
+  min-width: 0;
+}
+.sidebar-logo-word-main { display: flex; align-items: baseline; gap: 3px; line-height: 1; }
+.sidebar-logo-q {
   font-family: var(--font-display);
-  font-size: var(--fs-lg); color: var(--white); font-weight: 700;
+  font-size: 19px; font-weight: 900;
+  background: linear-gradient(90deg, var(--red), #ff6b8e);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
 }
+.sidebar-logo-flow {
+  font-family: var(--font-body);
+  font-size: 14px; font-weight: 800; letter-spacing: 1.5px;
+  color: var(--white);
+}
+.sidebar-logo-tagline {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 8px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+  color: rgba(255,255,255,0.45);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+.sidebar-logo-tagline-dash { width: 10px; height: 1px; background: var(--red); flex-shrink: 0; }
 
 .sidebar-section-label {
   font-size: 10px; color: rgba(255,255,255,0.28);

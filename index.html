@@ -26,8 +26,10 @@
             'liquid-blob': 'blob 10s infinite alternate',
             'liquid-blob-reverse': 'blob-reverse 12s infinite alternate',
             'fade-in-up': 'fadeInUp 0.6s ease-out forwards',
-            'qflow-spin': 'qflowSpin 3.5s linear infinite',
-            'qflow-shimmer': 'qflowShimmer 3.5s ease-in-out infinite',
+            'spin-slow': 'spin 4s linear infinite',
+            'draw-circle': 'drawCircle 1.5s ease-out forwards',
+            'draw-check': 'drawCheck 1s 0.8s ease-out forwards',
+            'bounce-arrow': 'bounceArrow 2s infinite ease-in-out',
           },
           keyframes: {
             blob: {
@@ -44,14 +46,18 @@
               '0%': { opacity: '0', transform: 'translateY(20px)' },
               '100%': { opacity: '1', transform: 'translateY(0)' },
             },
-            qflowSpin: {
-              '0%':   { transform: 'rotate(0deg)' },
-              '100%': { transform: 'rotate(360deg)' },
+            drawCircle: {
+              '0%': { strokeDasharray: '0 100' },
+              '100%': { strokeDasharray: '80 100' },
             },
-            qflowShimmer: {
-              '0%, 100%': { 'background-position': '0% 50%' },
-              '50%':      { 'background-position': '100% 50%' },
+            drawCheck: {
+              '0%': { strokeDasharray: '30', strokeDashoffset: '30' },
+              '100%': { strokeDasharray: '30', strokeDashoffset: '0' },
             },
+            bounceArrow: {
+              '0%, 100%': { transform: 'translate(0, 0)' },
+              '50%': { transform: 'translate(3px, 3px)' },
+            }
           }
         }
       }
@@ -87,26 +93,6 @@
       -webkit-backdrop-filter: blur(24px);
       box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255,255,255,0.1);
     }
-
-    /* Q Flow logomark: the bright "comet" arc chases continuously around the
-       ring — evoking data/cases flowing through the process (gather ->
-       respond -> investigate -> verify) in one closed loop. transform-box:
-       fill-box makes the SVG rotate around its own center instead of the
-       page origin. */
-    .qflow-comet {
-      transform-box: fill-box;
-      transform-origin: center;
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .qflow-comet, .qflow-shimmer-text { animation: none !important; }
-    }
-    .qflow-shimmer-text {
-      background-image: linear-gradient(90deg, rgba(255,255,255,0.55) 0%, #ffffff 25%, rgba(255,255,255,0.55) 50%, #ffffff 75%, rgba(255,255,255,0.55) 100%);
-      background-size: 220% 100%;
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
-    }
   </style>
 </head>
 <body class="relative min-h-screen flex items-center justify-center overflow-hidden text-white selection:bg-brandred selection:text-white">
@@ -124,23 +110,49 @@
       <div class="absolute -top-32 -left-32 w-64 h-64 rounded-full border border-white/5 pointer-events-none"></div>
       
       <div class="relative z-10">
-        <div class="flex items-center gap-3 mb-12 transform hover:scale-105 transition-transform duration-300">
-          <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-brandred to-[#8B0020] flex items-center justify-center shadow-[0_0_20px_rgba(218,0,55,0.4)]">
-            <svg width="26" height="26" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <!-- "Q" ring = the closed-loop quality flow: gather -> respond ->
-                   investigate -> verify -> back to start. Tail makes it read
-                   as a Q; the checkmark inside reads as "verified/satisfied". -->
-              <circle cx="20" cy="20" r="11" stroke="#ffffff" stroke-opacity="0.32" stroke-width="3" fill="none" stroke-linecap="round" stroke-dasharray="50.5 18.6" transform="rotate(120 20 20)"/>
-              <circle class="qflow-comet animate-qflow-spin" cx="20" cy="20" r="11" stroke="#ffffff" stroke-width="3" fill="none" stroke-linecap="round" stroke-dasharray="9 60.1"/>
-              <path d="M28 28L33 33" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/>
-              <path d="M13 20.5L18 25.5L29 13.5" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <!-- ═══════════════ NEW Q FLOW SMART LOGO ═══════════════ -->
+        <div class="flex items-center gap-5 mb-12 select-none group">
+          
+          <!-- Animated Logo Icon -->
+          <div class="relative flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-[#DA0037] to-[#7a001c] shadow-[0_8px_30px_rgba(218,0,55,0.4)] overflow-hidden shrink-0 transition-all duration-500 group-hover:shadow-[0_8px_40px_rgba(218,0,55,0.6)] group-hover:-translate-y-0.5">
+            
+            <!-- Rotating ambient glow -->
+            <div class="absolute w-[150%] h-[150%] bg-[conic-gradient(from_0deg,transparent_0_280deg,rgba(255,255,255,0.4)_360deg)] animate-spin-slow opacity-60"></div>
+            <div class="absolute inset-[1.5px] rounded-xl bg-gradient-to-br from-[#DA0037] to-[#6b0018]"></div>
+
+            <svg width="34" height="34" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" class="relative z-10">
+              <!-- Q Circle Flow (Gathering Data & Quality base) -->
+              <path d="M20 6C12.268 6 6 12.268 6 20C6 27.732 12.268 34 20 34C23.6332 34 26.9423 32.6143 29.5 30.334" 
+                    stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" 
+                    class="animate-draw-circle" pathLength="100"></path>
+              
+              <!-- Checkmark (Investigation, Verify & Satisfaction) -->
+              <path d="M13 20L17.5 24.5L28 13.5" 
+                    stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" 
+                    class="animate-draw-check"></path>
+                    
+              <!-- Outward Arrow Tail (Quick Response & Counter Measure) -->
+              <g class="animate-bounce-arrow">
+                <path d="M27 27L36 36M36 36V28.5M36 36H28.5" 
+                      stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></path>
+              </g>
             </svg>
           </div>
-          <span class="flex items-baseline gap-1.5">
-            <span class="font-display text-3xl font-black tracking-tight text-white">Q</span>
-            <span class="font-display text-xl font-medium tracking-[0.3em] qflow-shimmer-text animate-qflow-shimmer">FLOW</span>
-          </span>
+
+          <!-- Elegant Wordmark -->
+          <div class="flex flex-col justify-center mt-1">
+            <div class="flex items-baseline gap-1.5">
+              <span class="font-display text-[2rem] font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-[#DA0037] to-[#ff6b8e] drop-shadow-[0_0_10px_rgba(218,0,55,0.5)]">Q</span>
+              <span class="font-body text-2xl font-extrabold tracking-[0.18em] text-white">FLOW</span>
+            </div>
+            <div class="flex items-center gap-2 mt-0.5 opacity-60 group-hover:opacity-100 transition-opacity duration-500">
+              <div class="h-[1px] w-5 bg-brandred"></div>
+              <span class="text-[0.6rem] font-bold tracking-[0.25em] text-white uppercase">Quality Control</span>
+            </div>
+          </div>
+          
         </div>
+        <!-- ═════════════════════════════════════════════════════ -->
         
         <h2 class="font-display text-4xl md:text-5xl font-black leading-tight mb-4 text-transparent bg-clip-text bg-gradient-to-r from-white to-white/60">
           Quality Control,<br>Elevated.
@@ -292,8 +304,6 @@
             <p class="text-white/50 text-sm">Verify your identity, then set a new password.</p>
           </div>
 
-          <!-- STEP 1: verify identity (email + employee ID — same check registration
-               already uses for duplicates, so no new trust mechanism is introduced) -->
           <form id="forgotStep1Form" onsubmit="event.preventDefault(); handleForgotVerify();" class="space-y-5">
             <div>
               <label class="block text-xs font-bold text-white/60 uppercase tracking-wide mb-2">Company Email</label>
@@ -308,7 +318,6 @@
             </button>
           </form>
 
-          <!-- STEP 2: set a new password — hidden until Step 1 verifies -->
           <form id="forgotStep2Form" onsubmit="event.preventDefault(); handleForgotReset();" class="space-y-5 hidden">
             <div class="px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white/70">
               Identity verified for <strong id="forgotVerifiedName" class="text-white"></strong>. Choose a new password below.
@@ -339,24 +348,9 @@
   <script>
     const POWER_AUTOMATE_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/f0cff0aa4ecb4945b5645dceca73435e/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=xPo6GVPi-xKnIAfosoE89oM8Sj6ih5vxz6ngZgB9Gx0";
     const REFRESH_CLAIMS_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/7d517aeb2883465299e275a3413b7d14/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=PR5zN8ycfRw5O9B74xdQIn1aHyegiI22i5eDA74lWzE";
-    // ── RESET PASSWORD URL ────────────────────────────────────────────────
-    // Fired from the "Forgot password?" flow once a user has verified their
-    // identity (email + Employee ID matched against users.js — Step 1)
-    // and chosen a new password (Step 2). Should find the matching row in
-    // the Microsoft List (match on email, same as login) and overwrite its
-    // Password column with newPassword — nothing else. Payload sent:
-    // { email, empId, newPassword }. This is a placeholder — until you
-    // paste a real Power Automate HTTP-trigger URL here, handleForgotReset()
-    // still succeeds locally (see the PASTE_ guard there) but nothing is
-    // written to the Microsoft List, so the new password only "works" until
-    // users.js is next regenerated with the OLD one still in it.
     const RESET_PASSWORD_URL = "PASTE_YOUR_RESET_PASSWORD_URL_HERE";
     const REMEMBER_LOGIN_KEY = 'qc_rememberedLogin';
 
-    /** Loads users.js fresh (cache-busted) and resolves with USER_DATABASE.
-     *  Shared by handleLogin() (credential check) and handleRegister()
-     *  (duplicate check) so both always see the current file, not a
-     *  browser-cached copy from an earlier page load. */
     function loadUserDatabase() {
       return new Promise(function(resolve, reject) {
         const existing = document.getElementById('usersDbScript');
@@ -377,7 +371,6 @@
       });
     }
 
-    /** Pre-fills the login form from a previously "remembered" login, if any. */
     function restoreRememberedLogin() {
       try {
         const saved = JSON.parse(localStorage.getItem(REMEMBER_LOGIN_KEY) || 'null');
@@ -386,14 +379,11 @@
           document.getElementById('loginPassword').value = saved.password || '';
           document.getElementById('rememberMe').checked = true;
         }
-      } catch (_) { /* ignore malformed/legacy storage */ }
+      } catch (_) { }
     }
     window.addEventListener('DOMContentLoaded', restoreRememberedLogin);
 
     function toggleView(view) {
-      // Adjusted to manipulate classList for Tailwind's display properties.
-      // Generic 3-way switch (login / register / forgot) — each view's
-      // section element id is "<name>View".
       ['login', 'register', 'forgot'].forEach(function(name) {
         const el = document.getElementById(name + 'View');
         if (!el) return;
@@ -439,8 +429,6 @@
       });
 
       if (validUser) {
-        // Remember Me — save or clear the credential based on the checkbox,
-        // only on a SUCCESSFUL login (never persist a failed attempt).
         const rememberChecked = document.getElementById('rememberMe').checked;
         if (rememberChecked) {
           localStorage.setItem(REMEMBER_LOGIN_KEY, JSON.stringify({ email: email, password: pass }));
@@ -476,12 +464,6 @@
       const btn = document.getElementById('registerBtn');
       btn.textContent = 'Checking for duplicates...'; btn.disabled = true;
 
-      // Duplicate check — block registration if this email OR first name
-      // already exists in users.js (the client-side snapshot of the
-      // Microsoft List). NOTE: this is only as fresh as users.js itself —
-      // if there isn't a flow that regenerates users.js the same way
-      // REFRESH_CLAIMS_URL regenerates claims.js, two people registering
-      // within the same stale window could both slip through.
       let users;
       try {
         users = await loadUserDatabase();
@@ -520,17 +502,8 @@
       }
     }
 
-    /* ── FORGOT PASSWORD ────────────────────────────────────────────────
-       Two steps, same identity-check bar as registration's duplicate
-       check (email + Employee ID both matching a real users.js row) —
-       this app has no email/SMS channel to send a reset link through, so
-       "prove you know your own Employee ID" is the lightest verification
-       available without adding new infrastructure. */
-    let _forgotVerifiedUser = null; // set by Step 1, read by Step 2, cleared on any reset/navigate-away
+    let _forgotVerifiedUser = null; 
 
-    /** Restores the Forgot Password form back to its Step 1 state — called
-     *  whenever the user navigates away from it, so reopening later never
-     *  shows a stale "identity verified" Step 2 from a previous attempt. */
     function resetForgotView() {
       _forgotVerifiedUser = null;
       document.getElementById('forgotStep1Form').classList.remove('hidden');
@@ -576,7 +549,7 @@
     }
 
     async function handleForgotReset() {
-      if (!_forgotVerifiedUser) { toggleView('forgot'); resetForgotView(); return; } // defensive — Step 2 shouldn't be reachable without this
+      if (!_forgotVerifiedUser) { toggleView('forgot'); resetForgotView(); return; } 
 
       const newPassword = document.getElementById('forgotNewPassword').value;
       const confirmPassword = document.getElementById('forgotConfirmPassword').value;
