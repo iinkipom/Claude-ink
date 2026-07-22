@@ -5081,8 +5081,8 @@
       }
 
       return `
-        <div class="fut-card sb-roster-player-card ${roleClass}${isTopScorer ? ' is-topscorer' : ''}" style="cursor:pointer;" onclick="viewPlayerProfile('${empIdAttr}')" title="View ${escapeHtml(firstName)}'s profile">
-          ${isTopScorer ? '<div class="fut-topscorer-ribbon">🏆 TOP SCORER</div>' : ''}
+        <div class="fut-card sb-roster-player-card ${roleClass}${isTopScorer ? ' is-topscorer' : ''}" style="cursor:pointer;" onclick="viewPlayerProfile('${empIdAttr}')" title="${isTopScorer ? '🏆 Top Scorer this month — ' : ''}View ${escapeHtml(firstName)}'s profile">
+          ${isTopScorer ? '<div class="fut-emblem">🏆</div>' : ''}
           <div class="fut-card-topbar">
             <div class="fut-card-oa">
               <span class="fut-card-oa-num">${overall !== null ? overall : '—'}</span>
