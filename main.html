@@ -93,7 +93,7 @@
   </div>
 
   <div class="sidebar-section-label">Account</div>
-  <div class="nav-item active" onclick="showPage('profile')">My Profile</div>
+  <div class="nav-item" onclick="showPage('profile')">My Profile</div>
   <div class="sidebar-section-label">Main Menu</div>
   <div class="nav-item" id="navInquiryClaim" style="display:none;" onclick="showPage('inquiryClaim')">Inquiry Claim</div>
   <div class="nav-item" id="navIssueClaim" onclick="showPage('issueClaim')" style="display:none; color:var(--red);">Issue Claim</div>
@@ -101,7 +101,7 @@
   <div class="nav-item" id="navShopAction" onclick="showPage('shopAction')">Shop Action</div>
   <div class="nav-item" id="navVerifyClaim" onclick="showPage('verifyClaim')">Verify Claim</div>
   <div class="nav-item" id="navFollowUpClaim" onclick="showPage('followUpClaim')">Follow up Claim</div>
-  <div class="nav-item" id="navScoreboard" onclick="showPage('scoreboard')">Scoreboard</div>
+  <div class="nav-item active" id="navScoreboard" onclick="showPage('scoreboard')">Scoreboard</div>
   <div class="nav-item" id="navTeamGraph" onclick="showPage('teamGraph')">Team Graph</div>
   
   <div class="sidebar-spacer"></div>
@@ -123,8 +123,8 @@
 <div class="main-content">
   <div class="topbar">
     <div class="topbar-title">
-      <h1 id="topbarTitle">My Profile</h1>
-      <p id="topbarSubtitle">View and manage your account information</p>
+      <h1 id="topbarTitle">Scoreboard</h1>
+      <p id="topbarSubtitle">Response time and performance scoring, week by week</p>
     </div>
   </div>
 
@@ -176,8 +176,8 @@
         </div>
 
         <div class="period-toggle" id="periodToggle">
-          <button type="button" class="active" data-period="year">Year</button>
-          <button type="button" data-period="month">Month</button>
+          <button type="button" data-period="year">Year</button>
+          <button type="button" class="active" data-period="month">Month</button>
           <button type="button" data-period="week">Week</button>
         </div>
         <!-- Sub-slicer: appears under Month (weeks 1-5) and Year (12 fiscal
@@ -2260,11 +2260,11 @@
   function _radarSeriesColor(i) { return RADAR_SERIES_COLORS[i % RADAR_SERIES_COLORS.length]; }
 
   /** Populates the Week-1..5 / Jan..Dec checkbox row under Month/Year, hides
-   *  it for Week (no smaller sub-unit to slice by). Every bucket starts
-   *  checked whenever the main period tab changes, so switching to Month or
-   *  Year immediately shows every week's/month's polygon stacked on the
-   *  same chart — matching the reference pivot-chart view where all weeks
-   *  are visible at once and can be unchecked individually to compare. */
+   *  it for Week (no smaller sub-unit to slice by). Only the CURRENT
+   *  week/month starts checked whenever the main period tab changes (or the
+   *  Profile page is (re)opened — see showPage()'s profile branch) — a
+   *  focused "where do I stand right now" default; the user can still check
+   *  additional weeks/months individually to stack them for comparison. */
   function renderRadarSubToggle(period) {
     const wrap = document.getElementById('periodSubToggle');
     if (!wrap) return;
@@ -2280,11 +2280,11 @@
     const mode = period === 'year' ? 'fy' : 'month';
     const buckets = _buildPeriodBuckets(now, mode);
     const currentIdx = buckets.classify(now);
-    _radarCheckedBuckets = new Set(buckets.labels.map((_, i) => i));
+    _radarCheckedBuckets = new Set([currentIdx]);
 
     wrap.innerHTML = buckets.labels.map((label, i) => `
       <label class="period-subtoggle-chip" style="--chip-color:${_radarSeriesColor(i)};">
-        <input type="checkbox" data-idx="${i}" checked>
+        <input type="checkbox" data-idx="${i}" ${i === currentIdx ? 'checked' : ''}>
         <span class="chip-swatch"></span>
         <span>${label}${i === currentIdx ? '<span class="current-dot" title="Current">&nbsp;•</span>' : ''}</span>
       </label>
@@ -2326,8 +2326,8 @@
       });
     }
     // For 'week' this also renders the (single-series) radar directly; for
-    // month/year it resets every checkbox to checked and renders the
-    // stacked multi-series view — see renderRadarSubToggle().
+    // month/year it resets to only the CURRENT week/month checked and
+    // renders that single-series view — see renderRadarSubToggle().
     renderRadarSubToggle(period);
   }
 
@@ -2377,7 +2377,11 @@
 
     _renderProfileCard(profile);
     try { initPeriodToggle(); } catch (e) { console.warn('[Radar] toggle init skipped:', e); }
-    setActivePeriod('year');
+    // Pre-warms the Profile page's radar (Month + only the current week
+    // checked — see renderRadarSubToggle()) so it's ready the first time
+    // the user actually clicks "My Profile"; showPage('profile') resets
+    // it to this same default on every subsequent visit too.
+    setActivePeriod('month');
 
 
     if (profile.userType === '4Dx Mentor') document.getElementById('navIssueClaim').style.display = 'flex';
@@ -2389,7 +2393,11 @@
     loadPartsDatabase();
     loadUsersDatabase();
     loadEvaluatesDatabase();
-    history.replaceState({ page: 'profile' }, '', '#profile');
+    // Scoreboard is the default landing page now (was My Profile) —
+    // skipHistory so this doesn't push a duplicate entry, then
+    // replaceState seeds the correct initial history state for popstate.
+    showPage('scoreboard', true);
+    history.replaceState({ page: 'scoreboard' }, '', '#scoreboard');
   });
 
   /* ── PAGE ROUTING ── */
@@ -2418,7 +2426,10 @@
           if (nm) nm.textContent = `${target.firstName || ''} ${target.lastName || ''}`.trim() || 'this player';
         }
       }
-      setActivePeriod(_currentRadarPeriod || 'year');
+      // Every visit to My Profile starts fresh on Month (with only the
+      // current week checked — see renderRadarSubToggle()), not whatever
+      // period was left selected on a previous visit.
+      setActivePeriod('month');
     }
     Object.values(pages).forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
     const targetPage = document.getElementById(pages[key]);
@@ -2445,7 +2456,7 @@
     if (!skipHistory) history.pushState({ page: key }, '', '#' + key);
   }
 
-  window.addEventListener('popstate', (e) => { if (e.state?.page) showPage(e.state.page, true); else showPage('profile', true); });
+  window.addEventListener('popstate', (e) => { if (e.state?.page) showPage(e.state.page, true); else showPage('scoreboard', true); });
   function handleLogout() { if (confirm('Are you sure you want to log out?')) window.location.href = 'index.html'; }
   function toggleField(elementId, show) {
     const el = document.getElementById(elementId);
