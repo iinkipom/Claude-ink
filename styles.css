@@ -2224,18 +2224,34 @@ textarea.form-control {
 }
 
 /* ---- Role-specific accents ---- */
-/* Mentor ("Coach") — cool blue/silver frame, distinct from Player/Team
-   Leader's warm gold — reinforces the role stands apart from scoring. */
+/* Mentor ("Coach") — same shield frame as the scored Player/Team Leader
+   tiers below, just in its own slate palette (#E8F4F3/#5A6465/#3A4346)
+   instead of a score-based color, since Mentors don't self-evaluate —
+   reads as "same design language, different role" rather than a 5th
+   score tier. */
 .fut-card.role-mentor {
-  background: linear-gradient(165deg, #f8fbff 0%, #e6eefc 100%);
-  border-color: #a9c3ec;
+  background:
+    linear-gradient(35deg, transparent 40%, rgba(232,244,243,0.4) 44%, transparent 48%),
+    linear-gradient(125deg, transparent 55%, rgba(232,244,243,0.22) 59%, transparent 63%),
+    linear-gradient(75deg, transparent 70%, rgba(58,67,70,0.25) 74%, transparent 78%),
+    linear-gradient(160deg, #E8F4F3 0%, #c3d2d1 30%, #5A6465 65%, #3A4346 100%);
+  filter:
+    drop-shadow(1px 0 0 #5A6465) drop-shadow(-1px 0 0 #5A6465)
+    drop-shadow(0 1px 0 #5A6465) drop-shadow(0 -1px 0 #5A6465)
+    drop-shadow(0 8px 14px rgba(0,0,0,0.4))
+    drop-shadow(0 0 8px rgba(90,100,101,0.5));
 }
 .fut-card.role-mentor:hover {
-  border-color: #7fa4e0;
-  box-shadow: 0 14px 30px rgba(0,0,0,0.45), 0 0 24px rgba(120,180,255,0.35);
+  filter:
+    drop-shadow(1.5px 0 0 #7d8a8b) drop-shadow(-1.5px 0 0 #7d8a8b)
+    drop-shadow(0 1.5px 0 #7d8a8b) drop-shadow(0 -1.5px 0 #7d8a8b)
+    drop-shadow(0 12px 20px rgba(0,0,0,0.45))
+    drop-shadow(0 0 14px rgba(90,100,101,0.7));
 }
-.fut-card.role-mentor .fut-card-oa-role { color: #4d7cc7; }
-.fut-card.role-mentor .fut-card-name { color: #34527e; }
+.fut-card.role-mentor .fut-card-oa-role { color: #3A4346; }
+.fut-card.role-mentor .fut-card-badge-position { background: #3A4346; }
+.fut-card.role-mentor .fut-card-name { color: #3A4346; border-top-color: rgba(58,67,70,0.35); }
+.fut-card.role-mentor .fut-card-stats-mentor { color: #3A4346; }
 
 /* Team Leader ("Striker") — the team's focal point: same width as the
    others now (all ~140px), kept visually distinct via a bigger OA digit. */
@@ -2249,16 +2265,18 @@ textarea.form-control {
 
 /* =================================================================
    TIERED SCORE FRAMES — 4 FUT-style shield card designs, one per
-   monthly-score band, applied to Player/Team Leader cards only
-   (Mentors don't self-evaluate, so their card always stays the plain
-   default design — see _futTier()/tierClass in _buildRosterCard()):
+   monthly-score band, applied to Player/Team Leader cards only (see
+   _futTier()/tierClass in _buildRosterCard()):
      50-69  tier50  "50 Score Up Frame"  — silver
      70-84  tier70  "70 Score Up Frame"  — gold
      85-94  tier85  "85 Score Up Frame"  — icon (white/gold marble)
      95+    tier95  "95 Score Up Frame"  — special (deep red)
-   Below 50 gets no tier class and keeps the plain cream card.
+   Below 50 gets no tier class and keeps the plain cream card. Mentors
+   don't self-evaluate so they're never tiered, but their card shares
+   this same shield frame in its own slate palette — see role-mentor
+   below this block.
 
-   All 4 share one shield silhouette (single top-center notch, straight
+   All share one shield silhouette (single top-center notch, straight
    sides, a shallow bottom point) via clip-path path() — exact px coords
    for this card's fixed 140x220 box. A plain border/box-shadow won't
    follow a clipped shape, so the frame edge + glow are both done as a
@@ -2267,13 +2285,15 @@ textarea.form-control {
    The point is kept shallow (only the last 10px) rather than a dramatic
    spike, so the stat grid's bottom row never gets clipped by the taper.
    ================================================================= */
-.fut-card[class*="tier"] {
+.fut-card[class*="tier"],
+.fut-card.role-mentor {
   --fut-shield: path('M0,4 C0,1.8 1.8,0 4,0 L58,0 L70,9 L82,0 L136,0 C138.2,0 140,1.8 140,4 L140,210 L70,220 L0,210 Z');
   clip-path: var(--fut-shield);
   border: none;
   border-radius: 0;
 }
-.fut-card[class*="tier"] .fut-card-topbar { margin-top: 9px; }
+.fut-card[class*="tier"] .fut-card-topbar,
+.fut-card.role-mentor .fut-card-topbar { margin-top: 9px; }
 
 /* ---- 50 Score Up Frame — silver ---- */
 .fut-card.tier50 {
