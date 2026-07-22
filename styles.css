@@ -2008,142 +2008,242 @@ textarea.form-control {
   padding: 10px 0;
 }
 
-/* ---- Player card base (shared by all three roles) ---- */
-.sb-roster-player-card {
-  width: 78px;
-  aspect-ratio: 244 / 390; /* matches the actual avatar art's true proportions */
+/* ---- FUT-style player card (shared by all three roles) ----
+   Overall score + role abbreviation top-left, avatar top-right, name +
+   Position/Section badges, then a 5-stat grid for Players/Team Leaders
+   (Mentors don't self-evaluate, so theirs shows a "Coach" tag instead). */
+.fut-card {
+  width: 118px;
   display: flex;
   flex-direction: column;
+  align-items: center;
   border-radius: var(--r-lg);
   overflow: hidden;
-  background: linear-gradient(165deg, rgba(255,217,160,0.07) 0%, rgba(255,255,255,0.03) 60%);
-  border: 1.5px solid rgba(255,217,160,0.22);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  position: relative;
+  background: linear-gradient(165deg, #fffdf7 0%, var(--ivory-deep) 100%);
+  border: 2px solid #d8c48f;
+  padding: 8px 8px 10px;
+  gap: 4px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.35);
   transition: transform .45s cubic-bezier(.34,1.56,.64,1), box-shadow .35s ease, border-color .35s ease, width .3s ease;
   flex-shrink: 0;
+  cursor: pointer;
 }
-.sb-roster-player-card:hover {
-  transform: translateY(-5px) scale(1.04);
-  border-color: rgba(255,217,160,0.55);
-  box-shadow: 0 14px 30px rgba(0,0,0,0.45), 0 0 24px rgba(255,217,160,0.3);
+.fut-card:hover {
+  transform: translateY(-5px) scale(1.045);
+  border-color: #c9a94f;
+  box-shadow: 0 14px 30px rgba(0,0,0,0.45), 0 0 24px rgba(216,196,143,0.4);
 }
-.sb-roster-card-photo-area {
-  position: relative;
+.fut-card-topbar {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 4px;
+}
+.fut-card-oa {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.fut-card-oa-num {
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--charcoal);
+  letter-spacing: -0.5px;
+}
+.fut-card-oa-role {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--red);
+  letter-spacing: 0.4px;
+  margin-top: 2px;
+}
+.fut-card-avatar-wrap {
   flex: 1;
-  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  min-width: 0;
 }
-.sb-roster-card-spotlight {
-  position: absolute;
-  width: 78%;
-  height: 78%;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(255,217,160,0.22) 0%, transparent 72%);
-  filter: blur(2px);
-  pointer-events: none;
-}
-.sb-roster-card-photo {
-  position: relative;
-  z-index: 1;
+.fut-card-avatar {
   width: 100%;
-  height: 100%;
+  max-height: 74px;
   object-fit: contain;
-  filter: drop-shadow(0 8px 16px rgba(0,0,0,0.55));
+  filter: drop-shadow(0 6px 10px rgba(0,0,0,0.3));
   transition: transform .45s cubic-bezier(.34,1.56,.64,1);
 }
-.sb-roster-player-card:hover .sb-roster-card-photo {
-  transform: scale(1.08) translateY(-2px);
-}
-.sb-roster-card-base {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 7px 6px;
-  background: linear-gradient(180deg, rgba(255,217,160,0.1) 0%, rgba(0,0,0,0.4) 100%);
-  border-top: 1.5px solid rgba(255,217,160,0.35);
-}
-.sb-roster-card-name {
-  font-size: 11px;
+.fut-card:hover .fut-card-avatar { transform: scale(1.06) translateY(-2px); }
+.fut-card-name {
+  width: 100%;
+  text-align: center;
+  font-size: 12px;
   font-weight: 800;
-  color: #f5e5cc;
-  letter-spacing: 0.2px;
+  color: var(--charcoal-soft);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
+  padding-top: 2px;
+  border-top: 1px solid var(--border);
 }
-.sb-roster-card-tags {
+.fut-card-badges {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
 }
-.sb-roster-card-role-badge {
+.fut-card-badge-position {
   background: var(--red);
   color: #fff;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.3px;
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: var(--r-full);
-  box-shadow: 0 0 8px rgba(218,0,55,0.55);
   white-space: nowrap;
 }
-.sb-roster-card-section-chip {
-  background: rgba(255,255,255,0.08);
-  color: rgba(255,255,255,0.55);
-  font-size: 8px;
+.fut-card-badge-section {
+  background: var(--surface-2);
+  color: var(--charcoal-soft);
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.3px;
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: var(--r-full);
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--border);
   white-space: nowrap;
+}
+.fut-card-stats {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  padding-top: 5px;
+  border-top: 1px dashed var(--border);
+}
+.fut-stat-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+.fut-stat-row.single { gap: 0; }
+.fut-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 34px;
+  justify-content: center;
+}
+.fut-stat-label {
+  font-size: 8.5px;
+  font-weight: 700;
+  color: var(--charcoal-soft);
+  letter-spacing: 0.3px;
+}
+.fut-stat-val {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--charcoal);
+}
+.fut-card-stats-mentor {
+  justify-content: center;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #5a86c9;
+  letter-spacing: 0.4px;
+  padding-top: 6px;
 }
 
 /* ---- Role-specific accents ---- */
-/* Mentor ("Coach") — cool blue/silver, distinct from the team's warm
-   gold palette, reinforcing that this role stands apart from the team. */
-.sb-roster-player-card.role-mentor {
-  width: 124px;
-  background: linear-gradient(165deg, rgba(120,180,255,0.1) 0%, rgba(255,255,255,0.03) 60%);
-  border-color: rgba(120,180,255,0.3);
+/* Mentor ("Coach") — cool blue/silver frame, distinct from Player/Team
+   Leader's warm gold — reinforces the role stands apart from scoring. */
+.fut-card.role-mentor {
+  width: 118px;
+  background: linear-gradient(165deg, #f8fbff 0%, #e6eefc 100%);
+  border-color: #a9c3ec;
 }
-.sb-roster-player-card.role-mentor:hover {
-  border-color: rgba(120,180,255,0.6);
+.fut-card.role-mentor:hover {
+  border-color: #7fa4e0;
   box-shadow: 0 14px 30px rgba(0,0,0,0.45), 0 0 24px rgba(120,180,255,0.35);
 }
-.sb-roster-player-card.role-mentor .sb-roster-card-spotlight {
-  background: radial-gradient(circle, rgba(120,180,255,0.25) 0%, transparent 72%);
-}
-.sb-roster-player-card.role-mentor .sb-roster-card-base {
-  background: linear-gradient(180deg, rgba(120,180,255,0.14) 0%, rgba(0,0,0,0.4) 100%);
-  border-top-color: rgba(120,180,255,0.4);
-}
-.sb-roster-player-card.role-mentor .sb-roster-card-name { color: #dbeaff; }
+.fut-card.role-mentor .fut-card-oa-role { color: #4d7cc7; }
+.fut-card.role-mentor .fut-card-name { color: #34527e; }
 
-/* Team Leader ("Striker") — the team's focal point: larger card, the
-   brightest gold/red glow on the board. */
-.sb-roster-player-card.role-leader {
-  width: 124px;
-  border-color: rgba(255,217,160,0.4);
-  box-shadow: 0 0 16px rgba(255,217,160,0.18);
+/* Team Leader ("Striker") — the team's focal point: larger card. */
+.fut-card.role-leader {
+  width: 132px;
 }
-.sb-roster-player-card.role-leader:hover {
-  border-color: rgba(255,217,160,0.75);
-  box-shadow: 0 16px 34px rgba(0,0,0,0.5), 0 0 30px rgba(255,217,160,0.45);
-}
-.sb-roster-player-card.role-leader .sb-roster-card-name { font-size: 12px; }
+.fut-card.role-leader .fut-card-oa-num { font-size: 22px; }
 
-/* Player (supporting cast) — smallest, quietest; the team's depth. */
-.sb-roster-player-card.role-player {
-  width: 92px;
-  opacity: 0.94;
+/* Player (supporting cast) — slightly smaller, the team's depth. */
+.fut-card.role-player {
+  width: 112px;
+  opacity: 0.97;
+}
+
+/* ---- Top Scorer of the month: gold/sapphire "legendary" frame ----
+   Whoever's monthly overall score is BOTH the section's highest AND at
+   least 80 gets this frame instead of the normal cream card — see
+   topScorerEmpIds in renderScoreboard(). */
+.fut-card.is-topscorer {
+  background: linear-gradient(165deg, #1b2350 0%, #0d1230 45%, #2a1f52 100%);
+  border: 2px solid #f0c96a;
+  box-shadow: 0 0 0 1px rgba(240,201,106,0.35), 0 10px 26px rgba(0,0,0,0.55), 0 0 26px rgba(120,150,255,0.35);
+}
+.fut-card.is-topscorer::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 25% 15%, rgba(120,170,255,0.35) 0%, transparent 45%),
+    radial-gradient(circle at 80% 75%, rgba(240,201,106,0.3) 0%, transparent 50%);
+  pointer-events: none;
+  animation: futTopscorerShimmer 3.2s ease-in-out infinite;
+}
+@keyframes futTopscorerShimmer {
+  0%, 100% { opacity: 0.7; }
+  50%      { opacity: 1; }
+}
+.fut-card.is-topscorer:hover {
+  border-color: #ffdd8a;
+  box-shadow: 0 0 0 1px rgba(255,221,138,0.5), 0 16px 34px rgba(0,0,0,0.6), 0 0 34px rgba(120,150,255,0.5);
+}
+.fut-card.is-topscorer .fut-card-oa-num { color: #fff8e6; }
+.fut-card.is-topscorer .fut-card-oa-role,
+.fut-card.is-topscorer .fut-card-badge-position { color: #0d1230; background: #f0c96a; }
+.fut-card.is-topscorer .fut-card-name { color: #f0c96a; border-top-color: rgba(240,201,106,0.35); }
+.fut-card.is-topscorer .fut-card-badge-section { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.75); border-color: rgba(255,255,255,0.2); }
+.fut-card.is-topscorer .fut-stat-label { color: rgba(255,255,255,0.55); }
+.fut-card.is-topscorer .fut-stat-val { color: #fff8e6; }
+.fut-card.is-topscorer .fut-card-stats { border-top-color: rgba(240,201,106,0.3); }
+.fut-topscorer-ribbon {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  color: #0d1230;
+  background: #f0c96a;
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  white-space: nowrap;
+  z-index: 2;
+}
+.fut-card.is-topscorer .fut-card-topbar { margin-top: 12px; }
+
+@media (max-width: 420px) {
+  .fut-card.role-player { width: 96px; }
+  .fut-card.role-mentor,
+  .fut-card.role-leader { width: 112px; }
 }
 
 /* ---- Stat-fill area: team-composition donut ---- */
@@ -2199,11 +2299,6 @@ textarea.form-control {
   color: rgba(255,255,255,0.4);
 }
 
-@media (max-width: 420px) {
-  .sb-roster-player-card.role-player { width: 80px; }
-  .sb-roster-player-card.role-mentor,
-  .sb-roster-player-card.role-leader { width: 104px; }
-}
 
 /* ---- Topline right cluster: mode toggle + gear + clock ---- */
 .sb-board-topline-right {

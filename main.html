@@ -2143,6 +2143,52 @@
     return db.filter(e => _evaluateRecordMatchesUser(e, myEmpId, myFirstName));
   }
 
+  /** Same idea as _myEvaluationRecords() but for an ARBITRARY roster user
+   *  (not necessarily the logged-in one or profileViewTarget) — used by the
+   *  Scoreboard to compute every teammate's own card stats simultaneously,
+   *  which _myEvaluationRecords()'s single "active profile" model can't do. */
+  function _evaluationRecordsForUser(u) {
+    const empId     = String((u && u.empId) || '').trim();
+    const firstName = String((u && u.firstName) || '').trim().toLowerCase();
+    const db = (typeof EVALUATES_DATABASE !== 'undefined' && Array.isArray(EVALUATES_DATABASE)) ? EVALUATES_DATABASE : [];
+    return db.filter(e => _evaluateRecordMatchesUser(e, empId, firstName));
+  }
+
+  /** This calendar month's {label: value(0-100)} scores for one roster
+   *  user, bucketed by week-of-month and averaged the same way
+   *  computeRadarScoresForPeriod('month') does for the logged-in user —
+   *  every week counts equally regardless of how many claims it holds. */
+  function computeMonthlyScoresForUser(u) {
+    const evals = _evaluationRecordsForUser(u);
+    const now = new Date();
+    const buckets = _buildPeriodBuckets(now, 'month');
+    const bucketEvals = Array.from({ length: buckets.count }, () => []);
+    evals.forEach(e => {
+      const d = _evaluateRecordDate(e);
+      if (!d) return;
+      const idx = buckets.classify(d);
+      if (idx >= 0) bucketEvals[idx].push(e);
+    });
+    const scores = {};
+    PERFORMANCE_LABELS.forEach(label => {
+      const key = PERFORMANCE_LABEL_TO_KEY[label];
+      const bucketAverages = bucketEvals.map(evs => _avgEvaluateValue(evs, key)).filter(v => v !== null);
+      const avg = bucketAverages.length > 0 ? bucketAverages.reduce((a, b) => a + b, 0) / bucketAverages.length : null;
+      scores[label] = Math.round((avg ?? RADAR_DEFAULT_MAX) * 10) / 10;
+    });
+    return scores;
+  }
+
+  /** {overall, scores} for one roster user's current month — overall is the
+   *  plain average of the 5 subject scores, same formula the Profile page's
+   *  radarTotal uses. */
+  function computeMonthlyOverallScoreForUser(u) {
+    const scores = computeMonthlyScoresForUser(u);
+    const vals = PERFORMANCE_LABELS.map(l => Number(scores[l]) || 0);
+    const overall = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+    return { overall, scores };
+  }
+
   /** Turns a list of evaluation records into {label: value(0-100)}, filling
    *  in RADAR_DEFAULT_MAX for any subject with no usable submissions. */
   function _scoresFromEvals(evals) {
@@ -5014,10 +5060,38 @@
       return t !== '4Dx Mentor' && t !== 'Team Leader';
     });
 
-    /** Builds one player-card's HTML. roleClass picks the visual accent
-     *  (role-mentor / role-leader / role-player). Shows First Name,
-     *  Position, and Section per the requested fields — User Type is
-     *  conveyed by which formation row the card appears in. */
+    // ---- This month's overall score per Player/Team Leader (Mentors don't
+    //      self-evaluate — see EVALUATE_SUBJECTS' appliesTo — so they're
+    //      excluded from scoring/the Top Scorer frame entirely). Whoever's
+    //      score is the section's highest AND reaches 80+ gets the special
+    //      gold "Top Scorer" card frame this month; ties all get it. ----
+    const scoreEligible = [...leaders, ...rosterPlayers];
+    const monthlyScoreByEmpId = new Map();
+    let maxMonthlyOverall = -1;
+    scoreEligible.forEach(u => {
+      const empId = String(u.empId || '');
+      const { overall } = computeMonthlyOverallScoreForUser(u);
+      monthlyScoreByEmpId.set(empId, overall);
+      if (overall > maxMonthlyOverall) maxMonthlyOverall = overall;
+    });
+    const topScorerEmpIds = new Set();
+    if (maxMonthlyOverall >= 80) {
+      scoreEligible.forEach(u => {
+        const empId = String(u.empId || '');
+        if (Math.abs((monthlyScoreByEmpId.get(empId) || 0) - maxMonthlyOverall) < 0.05) topScorerEmpIds.add(empId);
+      });
+    }
+
+    const ROLE_ABBR = { '4Dx Mentor': 'MT', 'Team Leader': 'TL' };
+    const STAT_ABBR = { 'Following Claim Status': 'FLW', 'Analysis Root Cause of Trouble': 'ANL', 'Correspondence Claim Case': 'COR', 'Discussion For Following Claim Case': 'DIS', 'Information To Concern Shop': 'INF' };
+
+    /** Builds one player-card's HTML in a FIFA-Ultimate-Team-style layout:
+     *  overall score + role abbreviation top-left, avatar top-right, name +
+     *  Position/Section badges below, then the 5 evaluated subjects as a
+     *  stat grid (Players/Team Leaders only — Mentors don't self-evaluate,
+     *  so their card omits the stat grid). Whoever is this month's top
+     *  scorer (see topScorerEmpIds above) renders with the gold/blue
+     *  "Top Scorer" frame instead of the normal cream card. */
     function _buildRosterCard(u, roleClass) {
       const firstName = u.firstName || 'Unnamed';
       const position  = u.position || '—';
@@ -5025,21 +5099,46 @@
       const avatarSrc = AVATAR_ASSET_PATH + resolveAvatarFileName(u.firstName);
       const fallback  = AVATAR_ASSET_PATH + AVATAR_FALLBACK_FILE;
       const empIdAttr = escapeHtml(String(u.empId || ''));
+      const userType  = (u.userType || '').trim();
+      const roleAbbr  = ROLE_ABBR[userType] || 'PL';
+      const isScored  = roleClass !== 'role-mentor';
+      const isTopScorer = isScored && topScorerEmpIds.has(String(u.empId || ''));
+      const overall = isScored ? Math.round(monthlyScoreByEmpId.get(String(u.empId || '')) || 0) : null;
+
+      let statsHtml = '';
+      if (isScored) {
+        const scores = computeMonthlyScoresForUser(u);
+        const statCell = label => `<div class="fut-stat"><span class="fut-stat-label">${STAT_ABBR[label]}</span><span class="fut-stat-val">${Math.round(scores[label] ?? 0)}</span></div>`;
+        statsHtml = `
+          <div class="fut-card-stats">
+            <div class="fut-stat-row">${statCell('Following Claim Status')}${statCell('Correspondence Claim Case')}</div>
+            <div class="fut-stat-row">${statCell('Analysis Root Cause of Trouble')}${statCell('Discussion For Following Claim Case')}</div>
+            <div class="fut-stat-row single">${statCell('Information To Concern Shop')}</div>
+          </div>`;
+      } else {
+        statsHtml = `<div class="fut-card-stats fut-card-stats-mentor"><span>★ Coach</span></div>`;
+      }
+
       return `
-        <div class="sb-roster-player-card ${roleClass}" style="cursor:pointer;" onclick="viewPlayerProfile('${empIdAttr}')" title="View ${escapeHtml(firstName)}'s profile">
-          <div class="sb-roster-card-photo-area">
-            <span class="sb-roster-card-spotlight"></span>
-            <img class="sb-roster-card-photo" src="${avatarSrc}"
-                 onerror="if(this.src.indexOf('${AVATAR_FALLBACK_FILE}')===-1){this.onerror=function(){this.style.display='none';};this.src='${fallback}';}"
-                 alt="${firstName}">
-          </div>
-          <div class="sb-roster-card-base">
-            <span class="sb-roster-card-name">${firstName}</span>
-            <div class="sb-roster-card-tags">
-              <span class="sb-roster-card-role-badge">${position}</span>
-              <span class="sb-roster-card-section-chip">${section}</span>
+        <div class="fut-card sb-roster-player-card ${roleClass}${isTopScorer ? ' is-topscorer' : ''}" style="cursor:pointer;" onclick="viewPlayerProfile('${empIdAttr}')" title="View ${escapeHtml(firstName)}'s profile">
+          ${isTopScorer ? '<div class="fut-topscorer-ribbon">🏆 TOP SCORER</div>' : ''}
+          <div class="fut-card-topbar">
+            <div class="fut-card-oa">
+              <span class="fut-card-oa-num">${overall !== null ? overall : '—'}</span>
+              <span class="fut-card-oa-role">${roleAbbr}</span>
+            </div>
+            <div class="fut-card-avatar-wrap">
+              <img class="fut-card-avatar" src="${avatarSrc}"
+                   onerror="if(this.src.indexOf('${AVATAR_FALLBACK_FILE}')===-1){this.onerror=function(){this.style.display='none';};this.src='${fallback}';}"
+                   alt="${firstName}">
             </div>
           </div>
+          <div class="fut-card-name">${escapeHtml(firstName)}</div>
+          <div class="fut-card-badges">
+            <span class="fut-card-badge-position">${escapeHtml(position)}</span>
+            <span class="fut-card-badge-section">${escapeHtml(section)}</span>
+          </div>
+          ${statsHtml}
         </div>`;
     }
 
