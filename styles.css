@@ -2025,8 +2025,8 @@ textarea.form-control {
    Position/Section badges, then a 5-stat grid for Players/Team Leaders
    (Mentors don't self-evaluate, so theirs shows a "Coach" tag instead). */
 .fut-card {
-  width: 160px;
-  height: 252px;
+  width: 140px;
+  height: 220px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2035,8 +2035,8 @@ textarea.form-control {
   position: relative;
   background: linear-gradient(165deg, #fffdf7 0%, var(--ivory-deep) 100%);
   border: 2px solid #d8c48f;
-  padding: 8px 8px 8px;
-  gap: 4px;
+  padding: 6px 6px 6px;
+  gap: 3px;
   box-shadow: 0 6px 16px rgba(0,0,0,0.35);
   transition: transform .45s cubic-bezier(.34,1.56,.64,1), box-shadow .35s ease, border-color .35s ease;
   flex-shrink: 0;
@@ -2065,18 +2065,18 @@ textarea.form-control {
   line-height: 1;
 }
 .fut-card-oa-num {
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 900;
   color: var(--charcoal);
   letter-spacing: -0.5px;
   text-shadow: 0 1px 3px rgba(255,255,255,0.9), 0 1px 3px rgba(255,255,255,0.9);
 }
 .fut-card-oa-role {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 800;
   color: var(--red);
-  letter-spacing: 0.4px;
-  margin-top: 2px;
+  letter-spacing: 0.3px;
+  margin-top: 1px;
 }
 .fut-card-avatar-wrap {
   flex: 1;
@@ -2097,10 +2097,10 @@ textarea.form-control {
 .fut-card-name {
   width: 100%;
   text-align: center;
-  font-size: 12px;
+  font-size: 10.5px;
   font-weight: 800;
   color: var(--charcoal-soft);
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px;
   text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
@@ -2112,25 +2112,25 @@ textarea.form-control {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 3px;
 }
 .fut-card-badge-position {
   background: var(--red);
   color: #fff;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 800;
-  letter-spacing: 0.3px;
-  padding: 2px 8px;
+  letter-spacing: 0.2px;
+  padding: 1px 6px;
   border-radius: var(--r-full);
   white-space: nowrap;
 }
 .fut-card-badge-section {
   background: var(--surface-2);
   color: var(--charcoal-soft);
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.3px;
-  padding: 2px 8px;
+  letter-spacing: 0.2px;
+  padding: 1px 6px;
   border-radius: var(--r-full);
   border: 1px solid var(--border);
   white-space: nowrap;
@@ -2139,43 +2139,43 @@ textarea.form-control {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-top: 2px;
-  padding-top: 5px;
+  gap: 1px;
+  margin-top: 1px;
+  padding-top: 3px;
   border-top: 1px dashed var(--border);
 }
 .fut-stat-row {
   display: flex;
   justify-content: center;
-  gap: 10px;
+  gap: 7px;
 }
 .fut-stat-row.single { gap: 0; }
 .fut-stat {
   display: flex;
   align-items: baseline;
-  gap: 4px;
-  min-width: 34px;
+  gap: 3px;
+  min-width: 28px;
   justify-content: center;
 }
 .fut-stat-label {
-  font-size: 8.5px;
+  font-size: 7.5px;
   font-weight: 700;
   color: var(--charcoal-soft);
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px;
 }
 .fut-stat-val {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 800;
   color: var(--charcoal);
 }
 .fut-card-stats-mentor {
   justify-content: center;
   align-items: center;
-  font-size: 10.5px;
+  font-size: 9.5px;
   font-weight: 800;
   color: #5a86c9;
-  letter-spacing: 0.4px;
-  padding-top: 6px;
+  letter-spacing: 0.3px;
+  padding-top: 4px;
 }
 
 /* ---- Role-specific accents ---- */
@@ -2193,8 +2193,8 @@ textarea.form-control {
 .fut-card.role-mentor .fut-card-name { color: #34527e; }
 
 /* Team Leader ("Striker") — the team's focal point: same width as the
-   others now (all ~150px), kept visually distinct via a bigger OA digit. */
-.fut-card.role-leader .fut-card-oa-num { font-size: 22px; }
+   others now (all ~140px), kept visually distinct via a bigger OA digit. */
+.fut-card.role-leader .fut-card-oa-num { font-size: 19px; }
 
 /* Player (supporting cast) — same size as Team Leader/Mentor now; slightly
    quieter via opacity only. */
@@ -2253,10 +2253,10 @@ textarea.form-control {
   white-space: nowrap;
   z-index: 2;
 }
-.fut-card.is-topscorer .fut-card-topbar { margin-top: 12px; }
+.fut-card.is-topscorer .fut-card-topbar { margin-top: 10px; }
 
 @media (max-width: 420px) {
-  .fut-card { width: 112px; height: 190px; }
+  .fut-card { width: 108px; height: 178px; }
 }
 
 
