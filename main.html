@@ -5148,19 +5148,15 @@
       }
 
       if (rosterPlayers.length) {
-        // Wrap into rows of at most 4, each row independently centered —
-        // a 5th+ player starts a brand-new centered row rather than
-        // overflowing or squeezing into the row above.
-        const PLAYERS_PER_ROW = 4;
-        const rows = [];
-        for (let i = 0; i < rosterPlayers.length; i += PLAYERS_PER_ROW) {
-          rows.push(rosterPlayers.slice(i, i + PLAYERS_PER_ROW));
-        }
-        html += `<div class="sb-roster-type-row row-players"><div class="sb-roster-type-label align-center">Players</div>`;
-        rows.forEach(row => {
-          html += `<div class="sb-roster-type-cards align-center">${row.map(u => _buildRosterCard(u, 'role-player')).join('')}</div>`;
-        });
-        html += `</div>`;
+        // Single flex-wrap container — lets the browser fit as many cards
+        // per row as the (now much wider) roster column actually has room
+        // for, instead of a hardcoded 4-per-row that wasted the extra
+        // width and forced more rows (and scrolling) than necessary.
+        html += `
+          <div class="sb-roster-type-row row-players">
+            <div class="sb-roster-type-label align-center">Players</div>
+            <div class="sb-roster-type-cards align-center">${rosterPlayers.map(u => _buildRosterCard(u, 'role-player')).join('')}</div>
+          </div>`;
       }
 
       formationEl.innerHTML = html || '<div class="sb-roster-empty-note">No team members found in your section yet.</div>';
