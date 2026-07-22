@@ -860,25 +860,6 @@
            pitch); Team Leader gets the prominent striker-style center
            row; Players fill the supporting rows below, 4 per row. -->
       <div class="sb-roster-formation" id="sbRosterFormation"></div>
-
-      <!-- Fills whatever extra height remains once sb-roster-board has been
-           stretched to match sb-board. Shows team composition as a 3-color
-           donut (Mentor / Leader / Player share) instead of dead space. -->
-      <div class="sb-roster-stat-fill">
-        <div class="sb-roster-stat-ring-wrap">
-          <svg viewBox="0 0 64 64">
-            <circle class="sb-roster-stat-ring-track" cx="32" cy="32" r="27"/>
-            <circle class="sb-roster-stat-ring-seg seg-mentor" id="sbRosterRingMentor" cx="32" cy="32" r="27" stroke-dasharray="0 169.6" stroke-dashoffset="0"/>
-            <circle class="sb-roster-stat-ring-seg seg-leader" id="sbRosterRingLeader" cx="32" cy="32" r="27" stroke-dasharray="0 169.6" stroke-dashoffset="0"/>
-            <circle class="sb-roster-stat-ring-seg seg-player" id="sbRosterRingPlayer" cx="32" cy="32" r="27" stroke-dasharray="0 169.6" stroke-dashoffset="0"/>
-          </svg>
-          <div class="sb-roster-stat-ring-num sb-font-digit" id="sbRosterActiveCount">0</div>
-        </div>
-        <div class="sb-roster-stat-text">
-          <strong>Active Team Members</strong>
-          <span id="sbRosterCapacityLabel">in your section</span>
-        </div>
-      </div>
     </div>
 
 
@@ -4856,26 +4837,6 @@
     return (profile.email || '').toLowerCase() === SCOREBOARD_ADMIN_EMAIL;
   }
 
-  /** Renders a multi-segment SVG donut ring (team composition: Mentor /
-   *  Leader / Player share). Each entry in segments is {id, count} — arc
-   *  length for each is proportional to count/total, stacked end-to-end
-   *  around the ring. Circumference for r=27 is 2π·27 ≈ 169.6, matching
-   *  each circle's starting stroke-dasharray in the HTML. If total is 0,
-   *  every segment collapses to a zero-length arc (just the empty track
-   *  shows), rather than dividing by zero. */
-  function _setRosterRingSegments(segments, total) {
-    const circumference = 169.6;
-    let cumulative = 0;
-    segments.forEach(seg => {
-      const el = document.getElementById(seg.id);
-      if (!el) return;
-      const arcLength = total > 0 ? circumference * (seg.count / total) : 0;
-      el.style.strokeDasharray = `${arcLength} ${Math.max(0, circumference - arcLength)}`;
-      el.style.strokeDashoffset = String(-cumulative);
-      cumulative += arcLength;
-    });
-  }
-
   /** Returns the fiscal year string (e.g. "26") for "now", matching getFiscalYear(). */
   function _currentFiscalYear() {
     return getFiscalYear(new Date());
@@ -5204,16 +5165,6 @@
 
       formationEl.innerHTML = html || '<div class="sb-roster-empty-note">No team members found in your section yet.</div>';
     }
-
-    // ---- Team composition donut: Mentor / Leader / Player share ----
-    const totalTeam = mentors.length + leaders.length + rosterPlayers.length;
-    setText('sbRosterActiveCount', totalTeam);
-    setText('sbRosterCapacityLabel', mySection ? `in ${mySection} section` : 'in your section');
-    _setRosterRingSegments([
-      { id: 'sbRosterRingMentor', count: mentors.length },
-      { id: 'sbRosterRingLeader', count: leaders.length },
-      { id: 'sbRosterRingPlayer', count: rosterPlayers.length },
-    ], totalTeam);
 
     // ---- Pull claims data (gracefully handle not-yet-loaded claims.js) ----
     const claims = (typeof ACTIVE_CLAIMS_DATABASE !== 'undefined' && Array.isArray(ACTIVE_CLAIMS_DATABASE))
