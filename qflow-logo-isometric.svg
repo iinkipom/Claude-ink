@@ -1,0 +1,42 @@
+<svg width="800" height="950" viewBox="0 0 800 950" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ribbonGrad" x1="400.0,208.5" x2="809.6,736.8" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ff4d6d"/>
+      <stop offset="45%" stop-color="#DA0037"/>
+      <stop offset="100%" stop-color="#DA0037" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="softBlur"><feGaussianBlur stdDeviation="9"/></filter>
+  </defs>
+
+  <rect width="800" height="950" fill="#EDEDED"/>
+
+  <!-- Recessed hole floor -->
+  <path d="M400.0,370.0 L235.5,275.0 L400.0,180.0 L564.5,275.0 Z" fill="#d6d6d6"/>
+  <path d="M400.0,370.0 L400.0,560.0 L235.5,465.0 L235.5,275.0 Z" fill="#9a9a9a"/>
+  <path d="M400.0,370.0 L564.5,275.0 L564.5,465.0 L400.0,560.0 Z" fill="#2b2b2b"/>
+
+  <!-- Glow behind the ribbon -->
+  <path d="M400.0,208.5 C453.5,258.4 507.0,308.2 507.0,308.2 C508.3,422.5 509.6,536.8 509.6,536.8 C563.6,569.8 599.6,591.8 599.6,591.8 C649.6,629.2 699.6,666.8 699.6,666.8 L809.6,736.8" fill="none" stroke="#DA0037" stroke-width="42" stroke-linecap="round" opacity="0.32" filter="url(#softBlur)"/>
+
+  <!-- Ring (the Q body) -->
+  <path d="M200.8,255.0 L400.0,140.0 L599.2,255.0 L564.5,275.0 L400.0,180.0 L235.5,275.0 Z" fill="#FFFFFF"/>
+  <path d="M400.0,600.0 L200.8,485.0 L200.8,255.0 L235.5,275.0 L235.5,465.0 L400.0,560.0 Z" fill="#444444"/>
+  <path d="M599.2,255.0 L599.2,485.0 L543.4,517.2 L518.5,491.6 L564.5,465.0 L564.5,275.0 Z" fill="#171717"/>
+  <path d="M475.7,556.3 L400.0,600.0 L400.0,560.0 L462.5,523.9 Z" fill="#171717"/>
+
+  <!-- Ribbon (flow / Q tail) on top -->
+  <path d="M400.0,208.5 C453.5,258.4 507.0,308.2 507.0,308.2 C508.3,422.5 509.6,536.8 509.6,536.8 C563.6,569.8 599.6,591.8 599.6,591.8 C649.6,629.2 699.6,666.8 699.6,666.8 L809.6,736.8" fill="none" stroke="url(#ribbonGrad)" stroke-width="30" stroke-linecap="round"/>
+  <path d="M400.0,208.5 C453.5,258.4 507.0,308.2 507.0,308.2 C508.3,422.5 509.6,536.8 509.6,536.8 C563.6,569.8 599.6,591.8 599.6,591.8 C649.6,629.2 699.6,666.8 699.6,666.8 L809.6,736.8" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.5"/>
+
+  <!-- Motion trail dashes past the tip -->
+  <circle cx="859.5522135787314" cy="769.75" r="8" fill="#DA0037" opacity="0.55"/>
+  <circle cx="901.5522135787314" cy="797.75" r="5.5" fill="#DA0037" opacity="0.3"/>
+  <circle cx="937.5522135787314" cy="821.75" r="3.5" fill="#DA0037" opacity="0.15"/>
+
+  <!-- Edge highlight lines for crispness -->
+  <path d="M200.8,255.0 L400.0,140.0 L599.2,255.0" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.6"/>
+  <path d="M400.0,600.0 L200.8,485.0 L200.8,255.0" fill="none" stroke="#000000" stroke-width="2" opacity="0.15"/>
+  <path d="M235.5,275.0 L400.0,180.0 L564.5,275.0" fill="none" stroke="#ffffff" stroke-width="1.5" opacity="0.5"/>
+
+  <text x="400" y="880" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="86" font-weight="800" fill="#171717" text-anchor="middle">Q Flow</text>
+</svg>
