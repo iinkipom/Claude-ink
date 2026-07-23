@@ -848,6 +848,7 @@
 
           <div style="display:flex; gap:10px; padding-top:16px; border-top:1px solid var(--border-light); margin-top:24px; align-items:center;">
             <button class="btn btn-red" id="submitVerificationBtn" style="width:auto; padding:12px 24px;" onclick="submitVerification()">✅ Submit Verification</button>
+            <button class="btn" id="confirmAssignmentBtn" style="width:auto; padding:12px 24px; background:var(--surface-2); color:var(--charcoal); border:1px solid var(--border);" onclick="confirmVerificationAssignments()" title="Email everyone currently assigned a verify person on this claim, with a link straight to this page">📧 Confirm Assignment &amp; Notify</button>
             <span id="verifyStatusMsg" style="font-size:12px; color:var(--charcoal-soft);"></span>
           </div>
         </div>
@@ -1246,11 +1247,15 @@
   //                                           5 (evalNotifySpeed) reads
   //                                           back for a Player's score —
   //                                           see computeNotifyShopScore().
-  //     verificationVideo:         string  — JSON array of {subject, url}
-  //                                           (subject = "Corrective_1"
-  //                                           etc.) — evidence video LINKS
-  //                                           only (e.g. Teams/OneDrive),
-  //                                           never uploaded as base64.
+  //     verificationVideo:         string  — always sent as "[]" now (the
+  //                                           video-link input was replaced
+  //                                           by document attachment below,
+  //                                           per request) — key kept in
+  //                                           the payload only so an
+  //                                           existing flow's Apply-to-each
+  //                                           over this field doesn't need
+  //                                           editing; safe to ignore/write
+  //                                           an empty array to its column.
   //     verificationImagesBase64:  array   — [{name, content}, ...], one
   //                                           entry per attached evidence
   //                                           photo. Upload each to
@@ -1268,6 +1273,25 @@
   //                                           "VerifyCorrectiveN_..." /
   //                                           "VerifyPreventiveN_..." so it
   //                                           routes back to the right
+  //                                           action on reopen.
+  //     verificationDocumentsBase64: array — [{name, content}, ...], same
+  //                                           idea as verificationImagesBase64
+  //                                           but for attached PDF/Excel
+  //                                           evidence documents instead of
+  //                                           photos. Upload each to the
+  //                                           SAME SharePoint folder as
+  //                                           verification photos (or a
+  //                                           sibling folder, your call),
+  //                                           then write the resulting
+  //                                           links into a
+  //                                           VerificationDocuments column
+  //                                           (JSON array of URLs) — same
+  //                                           "never write base64 itself"
+  //                                           rule as images. Each name is
+  //                                           pre-tagged
+  //                                           "VerifyCorrectiveDocN_..." /
+  //                                           "VerifyPreventiveDocN_..." so
+  //                                           it routes back to the right
   //                                           action on reopen.
   //     verificationLog:           string  — accumulated audit trail, one
   //                                           NEW line appended per submit:
@@ -1287,6 +1311,31 @@
   // save locally (selectedClaimData) and no-op the network call until you
   // replace it (see the PASTE_ guard in submitVerification()).
   const SAVE_VERIFICATION_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/14/workflows/4099506c8c0044319ea72761cbe85fd4/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=U_O3NrKpHZQsEwTXh91irfkPevtTA7fzF-PZSZJHuj0";
+
+  // ── CONFIRM VERIFY ASSIGNMENT + NOTIFY (send Outlook email) ─────────────
+  // Fired by the "📧 Confirm Assignment & Notify" button next to Submit
+  // Verification (Team Leader only). Payload:
+  //   {
+  //     id:        string — Microsoft List Item ID
+  //     claimNo:   string — display claim number, e.g. "Claim Case 26-005"
+  //     subject:   string — claim Subject, for the email body
+  //     assignees: array  — [{ empId, firstName, lastName, email, actions:
+  //                           ["Corrective 1","Preventive 2"], link }], one
+  //                           entry per DISTINCT person currently assigned
+  //                           to at least one action on this claim. `link`
+  //                           is a deep link back into this app
+  //                           (main.html?openVerify=<id>) that opens
+  //                           straight to this claim's Verify workspace
+  //                           after login — see the openVerify query-param
+  //                           handling in DOMContentLoaded.
+  //   }
+  // Flow setup: HTTP trigger with this JSON schema -> Apply to each over
+  // `assignees` -> "Send an email (V2)" (Outlook connector), To: item()
+  // ?['email'], with the claim number/subject/action list/link built into
+  // the email body from item() fields. PASTE YOUR TRIGGER URL BELOW — a
+  // placeholder no-ops the call (see the PASTE_ guard in
+  // confirmVerificationAssignments()).
+  const SEND_VERIFY_ASSIGNMENT_EMAIL_URL = "PASTE_YOUR_SEND_VERIFY_ASSIGNMENT_EMAIL_URL_HERE";
 
   // ── PAGE-LOAD / F5 REFRESH URL ───────────────────────────────────────────
   // Triggered ONCE whenever the browser tab is loaded or reloaded (F5 / Ctrl+R).
@@ -1706,6 +1755,16 @@
   // In-memory base64 image store — key = preview containerId
   // Also mirrored into selectedClaimData._photos so photos survive navigation back
   let investigationImageStore = {};
+
+  // Verify Claim evidence DOCUMENTS (PDF/Excel — replaces the old evidence
+  // video link input). Two parallel stores per action containerId
+  // (verifyDocs_<Type>_<N>):
+  //   verificationDocUrlStore[containerId] -> [{name, url}]     already saved to SharePoint (this claim, reopened)
+  //   verificationDocFiles[containerId]    -> [File, File, ...] picked THIS session, not yet uploaded
+  // Both reset per claim open (openVerifyWorkspace) and merged for display
+  // by _renderDocChips()/resolved for submit by _resolveExistingDocsForSave().
+  let verificationDocUrlStore = {};
+  let verificationDocFiles = {};
 
   /* ── triggerClaimsRefreshOnLoad ────────────────────────────────────────────
      Fires ONCE per page load / F5 reload. Calls the PAD Cloud flow that asks
@@ -2400,7 +2459,36 @@
     // replaceState seeds the correct initial history state for popstate.
     showPage('scoreboard', true);
     history.replaceState({ page: 'scoreboard' }, '', '#scoreboard');
+
+    // Deep link from a "Confirm Assignment & Notify" email — ?openVerify=<id>
+    // overrides the above, jumping straight to that claim's Verify
+    // workspace instead of the default Scoreboard landing page.
+    _handleDeepLinkOpenVerify();
   });
+
+  /** Reads ?openVerify=<claim id> from the URL (added by
+   *  confirmVerificationAssignments()'s emailed link) and, if present,
+   *  jumps straight to that claim's Verify Claim workspace once claims.js
+   *  has loaded — instead of leaving the user on the default landing page
+   *  to hunt for it themselves. No-ops if the param isn't present. */
+  function _handleDeepLinkOpenVerify() {
+    const openId = new URLSearchParams(location.search).get('openVerify');
+    if (!openId) return;
+    showPage('verifyClaim', true);
+    loadDataScript('claims.js', ['ACTIVE_CLAIMS_DATABASE']).then((result) => {
+      const list = Array.isArray(result.ACTIVE_CLAIMS_DATABASE) ? result.ACTIVE_CLAIMS_DATABASE : [];
+      window.ACTIVE_CLAIMS_DATABASE = list;
+      activeClaimsList = list;
+      verifyQueueList = list.filter(c => {
+        const raw = c.status ?? c.Status ?? c.ClaimStatus ?? c.Claim_Status ?? null;
+        const val = raw === null ? '' : (typeof raw === 'object' ? (raw.Value || raw.value || '') : String(raw).trim());
+        return val === 'QC Investigated';
+      });
+      const claim = list.find(c => String(c.id || c.ID) === String(openId));
+      if (claim) openVerifyWorkspace(claim);
+      else alert(`Could not find claim #${openId} to open for verification — it may no longer be awaiting verification.`);
+    }).catch((e) => console.warn('[deep link] failed to load claims.js:', e));
+  }
 
   /* ── PAGE ROUTING ── */
   const pages  = { profile:'pagProfile', issueClaim:'pagIssueClaim', complaints:'pagComplaints', analytics:'pagAnalytics', investigation:'pagInvestigation', inquiryClaim:'pagInquiryClaim', shopAction:'pagShopAction', verifyClaim:'pagVerifyClaim', followUpClaim:'pagFollowUpClaim', scoreboard:'pagScoreboard', teamGraph:'pagTeamGraph' };
@@ -3646,6 +3734,109 @@
       }
     }
     return out;
+  }
+
+  /** Renders the file-chip list for one Verify Claim document container —
+   *  already-saved documents (verificationDocUrlStore, real SharePoint
+   *  links) first, then this-session picks (verificationDocFiles, not yet
+   *  uploaded) with a remove (✕) button when canAct. Called after every
+   *  attach/remove AND once when the action block is first built. */
+  function _renderDocChips(containerId, canAct) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const existing = verificationDocUrlStore[containerId] || [];
+    const fresh = verificationDocFiles[containerId] || [];
+    let html = '';
+    existing.forEach(d => {
+      html += `<div class="doc-item"><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener">📄 ${escapeHtml(d.name)}</a></div>`;
+    });
+    fresh.forEach((f, i) => {
+      html += `<div class="doc-item">📄 ${escapeHtml(f.name)}${canAct ? ` <button type="button" onclick="removeVerificationDocFile('${containerId}',${i})" style="border:none;background:none;color:var(--red);cursor:pointer;font-weight:700;" title="Remove">✕</button>` : ''}</div>`;
+    });
+    container.innerHTML = html || (canAct ? '' : '<span style="font-size:11px;color:var(--charcoal-soft);">No documents attached.</span>');
+  }
+
+  /** File picker onchange for a Verify action's document attach — merges
+   *  with whatever's already picked THIS session (same merge-not-replace
+   *  fix as handleInvestigationPreviews, since re-opening the file picker
+   *  replaces input.files with only the newest selection). */
+  function handleVerificationDocPreviews(input, containerId) {
+    const files = Array.from(input.files);
+    if (!files.length) return;
+    verificationDocFiles[containerId] = (verificationDocFiles[containerId] || []).concat(files);
+    _renderDocChips(containerId, true);
+    input.value = '';
+  }
+
+  /** Removes one not-yet-submitted document pick (index into
+   *  verificationDocFiles[containerId]) — does NOT touch already-saved
+   *  documents (verificationDocUrlStore); there's no "delete" for those. */
+  function removeVerificationDocFile(containerId, idx) {
+    const list = verificationDocFiles[containerId];
+    if (!list) return;
+    list.splice(idx, 1);
+    _renderDocChips(containerId, true);
+  }
+
+  /** Parses the saved VerificationDocuments URL list and buckets each URL
+   *  into verificationDocUrlStore by the "VerifyCorrectiveDocN_"/
+   *  "VerifyPreventiveDocN_" tag baked into its filename — same routing
+   *  convention as _restoreVerificationPhotosFromUrls(), just for
+   *  documents instead of photos. Resets the store first (called fresh
+   *  per claim open). */
+  function _populateVerificationDocUrlStore(rawUrls) {
+    verificationDocUrlStore = {};
+    let urls = [];
+    if (Array.isArray(rawUrls)) urls = rawUrls.filter(Boolean);
+    else if (typeof rawUrls === 'string' && rawUrls.trim()) {
+      try { urls = JSON.parse(rawUrls).filter(Boolean); }
+      catch (_) { urls = rawUrls.split(',').map(s => s.trim()).filter(Boolean); }
+    }
+    urls.forEach(url => {
+      const filename = decodeURIComponent((String(url).split('/').pop() || '').split('?')[0]);
+      let key = null;
+      const cm = filename.match(/VerifyCorrectiveDoc(\d+)_/i);
+      if (cm) key = `verifyDocs_Corrective_${cm[1]}`;
+      const pm = filename.match(/VerifyPreventiveDoc(\d+)_/i);
+      if (pm) key = `verifyDocs_Preventive_${pm[1]}`;
+      if (!key) return;
+      const displayName = filename.replace(/^Verify(?:Corrective|Preventive)Doc\d+_/i, '');
+      if (!verificationDocUrlStore[key]) verificationDocUrlStore[key] = [];
+      verificationDocUrlStore[key].push({ name: displayName, url });
+    });
+  }
+
+  /** Submit-time equivalent of _resolveExistingPhotosForSave() for
+   *  documents: re-fetches every already-saved doc (verificationDocUrlStore)
+   *  and converts it to base64 alongside this session's fresh picks
+   *  (verificationDocFiles), so a resubmit that only touches a DIFFERENT
+   *  action's documents doesn't drop this container's already-saved ones —
+   *  same fix as the photo-disappearing bug, applied to documents too. */
+  async function _resolveExistingDocsForSave(containerId) {
+    const existing = verificationDocUrlStore[containerId] || [];
+    const existingEntries = [];
+    for (const { name, url } of existing) {
+      try {
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        const dataUrl = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result);
+          r.onerror = reject;
+          r.readAsDataURL(blob);
+        });
+        existingEntries.push({ name, dataUrl });
+      } catch (e) {
+        console.warn('[_resolveExistingDocsForSave] could not re-fetch existing document, it will be missing from this save:', url, e);
+      }
+    }
+    const freshFiles = verificationDocFiles[containerId] || [];
+    const freshEntries = await Promise.all(freshFiles.map(file => new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = e => resolve({ name: file.name, dataUrl: e.target.result });
+      reader.readAsDataURL(file);
+    })));
+    return existingEntries.concat(freshEntries);
   }
 
   // Render previews, persist to investigationImageStore AND to selectedClaimData._photos
@@ -7141,21 +7332,6 @@
     catch (_) { return {}; }
   }
 
-  /** verificationVideo is stored as a JSON array of {subject,url} objects
-   *  (PAD flow's schema) — this returns it reshaped into a
-   *  {subject: url} map, matching how assignees/timestamps are looked up
-   *  by action key elsewhere in this module. */
-  function _getVerificationVideoMap(claim) {
-    const map = {};
-    try {
-      const arr = JSON.parse(resolveField(claim || {}, ['verificationVideo', 'VerificationVideo'], '[]'));
-      (Array.isArray(arr) ? arr : []).forEach(entry => {
-        if (entry && entry.subject && entry.url) map[entry.subject] = entry.url;
-      });
-    } catch (_) { /* leave map empty */ }
-    return map;
-  }
-
   /** DD/MM/YY HH:MM:SS — same display convention self-evaluation and
    *  Finding Risk timestamps already use elsewhere in this app, reused
    *  here for verificationLog's accumulated entries. */
@@ -7595,6 +7771,7 @@
         : '<span class="status-badge verify-ready-badge" style="background:#fff8e0; color:#886600; border:1px solid #e8d080;">NOT YET DUE</span>';
     const readyBadge = state.result ? '<span class="status-badge status-verified">VERIFIED</span>' : dateBadge;
     const containerId = `verifyPrev_${type}_${num}`;
+    const docContainerId = `verifyDocs_${type}_${num}`;
     const isTeamLeader = role === 'Team Leader';
     const canAct = isTeamLeader || (role === 'Player' && _myVerificationAssignments(selectedClaimData).includes(key));
 
@@ -7625,8 +7802,9 @@
         <div id="${containerId}" class="preview-grid"></div>
       </div>
       <div class="form-group" style="margin-bottom:12px;">
-        <label style="font-size:11px;">Evidence Video Link (optional)</label>
-        <input type="url" class="form-control" placeholder="Paste a video link (Teams/OneDrive/etc.)" value="${escapeHtml(state.videoUrl || '')}" oninput="(verifyState['${key}']=verifyState['${key}']||{}).videoUrl=this.value">
+        <label style="font-size:11px;">Attached Document(s) — PDF / Excel</label>
+        <input type="file" class="form-control" accept=".pdf,.xls,.xlsx" multiple onchange="handleVerificationDocPreviews(this,'${docContainerId}')">
+        <div id="${docContainerId}"></div>
       </div>
       <div style="display:flex; gap:8px; align-items:center;">
         <button type="button" class="action-btn btn-verify-ok ${state.result === 'OK' ? 'selected' : ''}" onclick="setVerifyResult('${type}',${num},'OK')">✅ OK</button>
@@ -7639,7 +7817,8 @@
       <div class="form-group" style="margin-bottom:0;">
         <label style="font-size:11px;">Evidence Picture(s)</label>
         <div id="${containerId}" class="preview-grid"></div>
-        ${state.videoUrl ? `<a href="${escapeHtml(state.videoUrl)}" target="_blank" rel="noopener" style="display:inline-block; margin-top:8px; font-size:11px; color:var(--red); font-weight:700;">▶ View evidence video</a>` : ''}
+        <label style="font-size:11px; display:block; margin-top:10px;">Attached Document(s)</label>
+        <div id="${docContainerId}"></div>
         <div style="font-size:11px; color:var(--charcoal-soft); margin-top:6px;">
           ${assigneeName ? `Only ${escapeHtml(assigneeName)} (the assigned verify person) can attach evidence or mark this action.` : 'No verify person assigned yet — the Team Leader needs to assign one before this action can be verified.'}
         </div>
@@ -7664,6 +7843,7 @@
       ${actionControlsHtml}
     `;
     containerEl.appendChild(wrap);
+    _renderDocChips(docContainerId, canAct);
   }
 
   /** Toggles the (Team-Leader-only) verify-person <select> for one action. */
@@ -7740,6 +7920,7 @@
     selectedClaimData = claim;
     investigationImageStore = claim._photos ? Object.assign({}, claim._photos) : {};
     verifyState = {};
+    verificationDocFiles = {}; // this session's not-yet-uploaded document picks — reset per claim open
 
     document.getElementById('verifyQueueView').style.display = 'none';
     document.getElementById('verifyWorkspaceView').style.display = 'block';
@@ -7771,14 +7952,13 @@
       if (!verifyState[key]) verifyState[key] = {};
       verifyState[key].assignee = savedAssignees[key];
     });
-    // Merge in any saved evidence video links (also a separate field/JSON).
-    const savedVideos = _getVerificationVideoMap(claim);
-    Object.keys(savedVideos).forEach(key => {
-      if (!verifyState[key]) verifyState[key] = {};
-      verifyState[key].videoUrl = savedVideos[key];
-    });
-
     const role = getCurrentUserRoleOnClaim(claim);
+    // Only the Team Leader assigns verify people, so only they get the
+    // "Confirm Assignment & Notify" button — same gating as the Assign
+    // Verifier control inside each action block.
+    const confirmAssignBtn = document.getElementById('confirmAssignmentBtn');
+    if (confirmAssignBtn) confirmAssignBtn.style.display = (role === 'Team Leader') ? '' : 'none';
+
     const correctiveWrap = document.getElementById('verifyCorrectiveWrap'); correctiveWrap.innerHTML = '';
     const preventiveWrap = document.getElementById('verifyPreventiveWrap'); preventiveWrap.innerHTML = '';
 
@@ -7790,6 +7970,8 @@
     // correctly renders every action read-only for them.
 
     const verifyImgRaw = claim.verificationImages || claim.VerificationImages || '';
+    const verifyDocRaw = claim.verificationDocuments || claim.VerificationDocuments || '';
+    _populateVerificationDocUrlStore(verifyDocRaw);
     const correctiveByBlock = _extractActionTextByBlock(apText, 'Corrective');
     const preventiveByBlock = _extractActionTextByBlock(apText, 'Preventive');
     const correctiveImgNums = _extractTaggedBlockNumbers(verifyImgRaw, /VerifyCorrective(\d+)_/i);
@@ -7803,17 +7985,31 @@
     if (!preventiveNums.length) preventiveWrap.innerHTML = '<p style="font-size:12px;color:var(--charcoal-soft);">No preventive actions were recorded for this claim.</p>';
     else preventiveNums.forEach(n => _renderVerifyActionBlock('Preventive', n, preventiveByBlock[n] || { text: '', eff: '', due: '' }, preventiveWrap, role));
 
-    // Restore evidence photos: same-session memory store, else from saved URLs
-    // (only containers that actually got rendered above — i.e. only actions
-    // this user has evidence-attach access to — have an <input>/preview div
-    // to restore into; read-only blocks still show a bare preview-grid).
-    const hasMemoryPhotos = Object.keys(investigationImageStore).some(k => investigationImageStore[k]?.length > 0);
-    if (hasMemoryPhotos) {
-      correctiveNums.forEach(n => { restorePreviewsFromStore(`verifyPrev_Corrective_${n}`); makePreviewClickable(document.getElementById(`verifyPrev_Corrective_${n}`)); });
-      preventiveNums.forEach(n => { restorePreviewsFromStore(`verifyPrev_Preventive_${n}`); makePreviewClickable(document.getElementById(`verifyPrev_Preventive_${n}`)); });
-    } else {
-      _restoreVerificationPhotosFromUrls(verifyImgRaw);
-    }
+    // Restore evidence photos PER CONTAINER — always start from the saved
+    // URLs (covers every action, whether or not it was touched this
+    // session), THEN overlay any container that has its OWN in-memory
+    // entry (this session's newer, not-yet-reloaded attachments) on top.
+    //
+    // BUGFIX: this used to be all-or-nothing — ANY container anywhere
+    // having a memory-store entry (e.g. just-attached evidence for action
+    // #2) made EVERY container restore from memory only, so action #1's
+    // already-saved-to-server photos (never touched this session, so no
+    // memory-store entry of their own) rendered as empty. Submitting from
+    // that state then collected zero photos for action #1, overwriting
+    // VerificationImages with a shorter list and permanently dropping its
+    // evidence — exactly the "previous verified photo disappears after
+    // verifying a different action" bug reported.
+    _restoreVerificationPhotosFromUrls(verifyImgRaw);
+    correctiveNums.forEach(n => {
+      const containerId = `verifyPrev_Corrective_${n}`;
+      if (investigationImageStore[containerId]?.length) restorePreviewsFromStore(containerId);
+      makePreviewClickable(document.getElementById(containerId));
+    });
+    preventiveNums.forEach(n => {
+      const containerId = `verifyPrev_Preventive_${n}`;
+      if (investigationImageStore[containerId]?.length) restorePreviewsFromStore(containerId);
+      makePreviewClickable(document.getElementById(containerId));
+    });
 
     document.getElementById('verifyStatusMsg').textContent = '';
   }
@@ -7828,7 +8024,7 @@
     try {
       let vData = [];
       let verifyImgs = [];
-      let videos = [];
+      let verifyDocs = [];
       let touchedLabels = []; // "Corrective 1" etc. for every action actually decided THIS visit — feeds verificationLog
       let totalBlocks = 0, okBlocks = 0;
       // Start from whatever was already saved so an untouched action keeps
@@ -7849,22 +8045,28 @@
           const state = verifyState[key] || {};
           totalBlocks++;
           if (state.assignee) assignees[key] = state.assignee;
-          if (state.videoUrl && state.videoUrl.trim()) videos.push({ subject: key, url: state.videoUrl.trim() });
           if (state.result) {
             const reasonPart = state.result === 'NG' && state.reason ? `: ${state.reason}` : '';
             vData.push(`[${type} ${num}] ${state.result}${reasonPart}`);
             if (state.result === 'OK') okBlocks++;
             if (state.touchedNow) { timestamps[key] = nowIso; touchedLabels.push(`${type} ${num}`); }
           }
-          // Evidence photos are collected regardless of whether OK/NG has
-          // been picked yet — same reasoning as Inspection/Action photos:
-          // an attachment shouldn't depend on a decision also being made
-          // in the same visit.
+          // Evidence photos/documents are collected regardless of whether
+          // OK/NG has been picked yet — same reasoning as Inspection/Action
+          // photos: an attachment shouldn't depend on a decision also being
+          // made in the same visit.
           const containerId = `verifyPrev_${type}_${num}`;
           const photos = await _resolveExistingPhotosForSave(containerId);
           photos.forEach(e => {
             const taggedName = e.name && e.name.startsWith(`Verify${type}`) ? e.name : `Verify${type}${num}_${e.name || 'image.jpg'}`;
             verifyImgs.push({ name: taggedName, dataUrl: e.dataUrl });
+          });
+
+          const docContainerId = `verifyDocs_${type}_${num}`;
+          const docs = await _resolveExistingDocsForSave(docContainerId);
+          docs.forEach(e => {
+            const taggedName = e.name && e.name.startsWith(`Verify${type}Doc`) ? e.name : `Verify${type}Doc${num}_${e.name || 'document'}`;
+            verifyDocs.push({ name: taggedName, dataUrl: e.dataUrl });
           });
         }
       }
@@ -7914,8 +8116,9 @@
         verificationData: verificationText,
         verificationAssignees: JSON.stringify(assignees),
         verificationTimestamps: JSON.stringify(timestamps),
-        verificationVideo: JSON.stringify(videos),
+        verificationVideo: '[]', // evidence video link input was replaced by document attach — see verificationDocumentsBase64 below
         verificationImagesBase64: verifyImgs.map(obj => ({ name: obj.name, content: obj.dataUrl.split(',')[1] })),
+        verificationDocumentsBase64: verifyDocs.map(obj => ({ name: obj.name, content: obj.dataUrl.split(',')[1] })),
         verificationLog: verificationLog
       };
 
@@ -7942,6 +8145,81 @@
     } catch (e) {
       console.log('submitVerification (CORS suppressed):', e);
       statusMsg.textContent = '✔ Submitted (check flow)';
+    } finally {
+      btn.innerText = originalText; btn.disabled = false;
+    }
+  }
+
+  /** Team-Leader-only: emails every DISTINCT person currently assigned as a
+   *  verify person anywhere on this claim (across all Corrective/Preventive
+   *  actions, whether assigned just now or in an earlier visit), with a
+   *  deep link straight back to this claim's Verify workspace — see the
+   *  ?openVerify= handling in _handleDeepLinkOpenVerify(). Reads only the
+   *  CURRENT in-memory verifyState/assignments; doesn't touch verification
+   *  results, photos, documents, or status. Looks up each assignee's real
+   *  login email from USER_DATABASE by empId (falling back to a first+last
+   *  name match), since assignments only store name/empId, not email. */
+  async function confirmVerificationAssignments() {
+    if (!selectedClaimId || !selectedClaimData) return;
+    const btn = document.getElementById('confirmAssignmentBtn');
+    const originalText = btn.innerText;
+
+    const byPerson = new Map();
+    Object.keys(verifyState).forEach(key => {
+      const a = verifyState[key] && verifyState[key].assignee;
+      if (!a) return;
+      const personKey = String(a.empId || '').trim() || `${a.firstName || ''}|${a.lastName || ''}`;
+      if (!byPerson.has(personKey)) byPerson.set(personKey, { empId: a.empId || '', firstName: a.firstName || '', lastName: a.lastName || '', actions: [] });
+      const [type, num] = key.split('_');
+      byPerson.get(personKey).actions.push(`${type} ${num}`);
+    });
+
+    if (!byPerson.size) {
+      alert('No verify person has been assigned to any action yet — use "Assign Verifier" first.');
+      return;
+    }
+
+    const db = (typeof USER_DATABASE !== 'undefined' && Array.isArray(USER_DATABASE)) ? USER_DATABASE : [];
+    const link = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}main.html?openVerify=${encodeURIComponent(selectedClaimId)}`;
+
+    const assignees = Array.from(byPerson.values()).map(p => {
+      const match = db.find(u =>
+        (p.empId && String(u.empId || '').trim() === String(p.empId).trim()) ||
+        (String(u.firstName || '').trim().toLowerCase() === p.firstName.trim().toLowerCase() &&
+         String(u.lastName || '').trim().toLowerCase() === p.lastName.trim().toLowerCase())
+      );
+      return { empId: p.empId, firstName: p.firstName, lastName: p.lastName, email: match ? match.email : '', actions: p.actions, link };
+    });
+
+    const missingEmail = assignees.filter(a => !a.email);
+    if (missingEmail.length) {
+      const names = missingEmail.map(a => `${a.firstName} ${a.lastName}`.trim()).join(', ');
+      if (!confirm(`Could not find a login email for: ${names}. Continue notifying the rest anyway?`)) return;
+    }
+
+    const sendable = assignees.filter(a => a.email);
+    if (!sendable.length) { alert('No assignee has a matching login email — nothing to send.'); return; }
+
+    const runNo = selectedClaimData.index_running_no || selectedClaimData.IndexRunningNo || selectedClaimData.index || selectedClaimData.Index || 1;
+    const payload = {
+      id: selectedClaimId.toString(),
+      claimNo: buildClaimNo(runNo, resolveField(selectedClaimData, ['issueDate', 'IssueDate'], '')),
+      subject: resolveField(selectedClaimData, ['Subject', 'subject'], 'N/A'),
+      assignees: sendable,
+    };
+
+    btn.innerText = '📧 Sending...'; btn.disabled = true;
+    try {
+      if (SEND_VERIFY_ASSIGNMENT_EMAIL_URL && !SEND_VERIFY_ASSIGNMENT_EMAIL_URL.startsWith('PASTE_')) {
+        await fetch(SEND_VERIFY_ASSIGNMENT_EMAIL_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        alert(`✅ Notification sent to ${sendable.length} verify person(s).`);
+      } else {
+        console.log('[confirmVerificationAssignments] SEND_VERIFY_ASSIGNMENT_EMAIL_URL is still a placeholder — nothing was sent:', payload);
+        alert('This is a placeholder — paste your PAD Cloud Flow trigger URL into SEND_VERIFY_ASSIGNMENT_EMAIL_URL to actually send emails. Logged the payload to the console instead.');
+      }
+    } catch (e) {
+      console.log('confirmVerificationAssignments (CORS suppressed):', e);
+      alert('✔ Sent (check flow)');
     } finally {
       btn.innerText = originalText; btn.disabled = false;
     }
