@@ -5128,6 +5128,22 @@
         </div>`;
     }
 
+    /** Small reference card explaining what each card frame means — sits in
+     *  the leftover space next to the Team Leader row (that row rarely has
+     *  enough cards to fill the panel's width). Static content: doesn't
+     *  depend on who's actually on the roster. */
+    const frameLegendHtml = `
+      <div class="sb-frame-legend">
+        <div class="sb-frame-legend-title">Card Frame Guide</div>
+        <div class="sb-frame-legend-row"><span class="sb-frame-swatch swatch-mentor"></span>4Dx Mentor <em>— always</em></div>
+        <div class="sb-frame-legend-row"><span class="sb-frame-swatch swatch-default"></span>Below 50 <em>— Default</em></div>
+        <div class="sb-frame-legend-row"><span class="sb-frame-swatch swatch-tier50"></span>50–69 <em>— Silver</em></div>
+        <div class="sb-frame-legend-row"><span class="sb-frame-swatch swatch-tier70"></span>70–84 <em>— Gold</em></div>
+        <div class="sb-frame-legend-row"><span class="sb-frame-swatch swatch-tier85"></span>85–94 <em>— Icon</em></div>
+        <div class="sb-frame-legend-row"><span class="sb-frame-swatch swatch-tier95"></span>95+ <em>— Special</em></div>
+        <div class="sb-frame-legend-foot">Based on each player's own current-month score</div>
+      </div>`;
+
     const formationEl = document.getElementById('sbRosterFormation');
     if (formationEl) {
       let html = '';
@@ -5151,6 +5167,7 @@
               <div class="sb-roster-type-label align-center">⚡ Team Leader <span>Striker</span></div>
               <div class="sb-roster-type-cards align-center">
                 ${leaders.map(u => _buildRosterCard(u, 'role-leader')).join('')}
+                ${frameLegendHtml}
               </div>
             </div>
           </div>`;
@@ -5168,6 +5185,7 @@
             <div class="sb-roster-type-label align-center">⚡ Team Leader <span>Striker</span></div>
             <div class="sb-roster-type-cards align-center">
               ${leaders.map(u => _buildRosterCard(u, 'role-leader')).join('')}
+              ${frameLegendHtml}
             </div>
           </div>`;
       }

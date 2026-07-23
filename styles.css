@@ -2400,6 +2400,70 @@ textarea.form-control {
   .fut-card { width: 108px; height: 178px; }
 }
 
+/* ---- Card Frame Guide — small reference panel explaining the tiers
+   above, dropped into the Team Leader row's leftover width (that row
+   rarely has enough cards to fill the panel on its own). Height matches
+   a roster card (220px) so it sits flush with the row. ---- */
+.sb-frame-legend {
+  flex: 1 1 190px;
+  min-width: 170px;
+  max-width: 260px;
+  height: 220px;
+  box-sizing: border-box;
+  background: rgba(255,255,255,0.03);
+  border: 1.5px dashed rgba(255,255,255,0.15);
+  border-radius: var(--r-lg);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sb-frame-legend-title {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.55);
+  margin-bottom: 2px;
+}
+.sb-frame-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.85);
+  white-space: nowrap;
+}
+.sb-frame-legend-row em {
+  font-style: normal;
+  font-weight: 500;
+  color: rgba(255,255,255,0.45);
+}
+.sb-frame-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.12) inset;
+}
+.swatch-mentor  { background: linear-gradient(160deg, #E8F4F3 0%, #5A6465 60%, #3A4346 100%); }
+.swatch-default { background: linear-gradient(160deg, #fffdf7 0%, var(--ivory-deep) 100%); border: 1px solid #d8c48f; }
+.swatch-tier50  { background: linear-gradient(160deg, #f4f5f7 0%, #b9bec4 55%, #7d838c 100%); }
+.swatch-tier70  { background: linear-gradient(160deg, #fff3c4 0%, #d9a52e 55%, #8a6014 100%); }
+.swatch-tier85  { background: linear-gradient(160deg, #ffffff 0%, #e8e4da 50%, #cdbb7e 100%); }
+.swatch-tier95  { background: linear-gradient(160deg, #7a0d24 0%, #3d0712 100%); }
+.sb-frame-legend-foot {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(255,255,255,0.1);
+  font-size: 9.5px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.35);
+  line-height: 1.4;
+  white-space: normal;
+}
+
 
 
 /* ---- Topline right cluster: mode toggle + gear + clock ---- */
