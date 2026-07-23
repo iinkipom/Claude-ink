@@ -810,11 +810,13 @@
                 <th>Investigated On</th>
                 <th>Corrective</th>
                 <th>Preventive</th>
+                <th>Ready to Verify</th>
+                <th>Progress</th>
                 <th>Status</th>
               </tr>
             </thead>
             <tbody id="verifyQueueBody">
-              <tr><td colspan="7" style="text-align:center; padding:40px; color:var(--charcoal-soft);">Loading claims...</td></tr>
+              <tr><td colspan="9" style="text-align:center; padding:40px; color:var(--charcoal-soft);">Loading claims...</td></tr>
             </tbody>
           </table>
         </div>
@@ -7246,12 +7248,300 @@
     });
   }
 
+  const VERIFY_QUEUE_COLUMNS = [
+    { key:'claimNo',    label:'Claim No.' },
+    { key:'subject',    label:'Subject' },
+    { key:'shop',       label:'Shop' },
+    { key:'closeDate',  label:'Investigated On' },
+    { key:'corrective', label:'Corrective' },
+    { key:'preventive', label:'Preventive' },
+    { key:'ready',      label:'Ready to Verify' },
+    { key:'progress',   label:'Progress' },
+    { key:'status',     label:'Status' },
+  ];
+  let verifyQueueList = [];                                     // last-fetched queue, so re-sorting/filtering doesn't need a re-fetch
+  let verifyQueueSortState = { key: 'claimNo', dir: 'desc' };    // latest claim no. on top by default
+  let verifyQueueColumnFilters = {};                             // colKey -> Set of allowed display values (absent = no filter)
+  let verifyQueueOpenMenuKey = null;
+
+  /** Computes every display/sortable/filterable value for one Verify-queue
+   *  row once — same "single source of truth" pattern as getClaimRowModel().
+   *  Also does the actual "ready to verify" / "progress" math: an action is
+   *  READY once its Effective or Due date has passed and it hasn't been
+   *  given an OK/NG yet (identical definition to the READY TO VERIFY badge
+   *  shown per-action inside the workspace — see _renderVerifyActionBlock). */
+  function getVerifyRowModel(claim, i) {
+    const runNo = claim.index_running_no || claim.IndexRunningNo || claim.index || claim.Index || (i + 1);
+    const cNo = buildClaimNo(runNo, resolveField(claim, ['issueDate', 'IssueDate'], ''));
+
+    let shopVal = '—';
+    const _shopRaw = claim.shopConcerned || claim.ShopConcerned || claim.ClaimShop || claim.claimShop || '';
+    try {
+      const sc = JSON.parse(_shopRaw);
+      if (Array.isArray(sc) && sc.length > 0) shopVal = sc.join(', ');
+      else if (typeof sc === 'string' && sc.trim()) shopVal = sc.trim();
+    } catch (_) { if (_shopRaw && _shopRaw.trim()) shopVal = _shopRaw.trim(); }
+
+    const closeDateRaw = claim.CloseDate || claim.closeDate || '';
+    const apText = resolveField(claim, ['actionPlan', 'ActionPlan', 'action_plan'], '');
+    const correctiveByBlock = _extractActionTextByBlock(apText, 'Corrective');
+    const preventiveByBlock = _extractActionTextByBlock(apText, 'Preventive');
+    const correctiveCount = Object.keys(correctiveByBlock).length;
+    const preventiveCount = Object.keys(preventiveByBlock).length;
+
+    const verifDataRaw = resolveField(claim, ['verificationData', 'VerificationData'], '');
+    const verifyState = _extractVerificationByBlock(verifDataRaw);
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let totalActions = 0, verifiedActions = 0, readyActions = 0;
+    [['Corrective', correctiveByBlock], ['Preventive', preventiveByBlock]].forEach(([type, byBlock]) => {
+      Object.keys(byBlock).forEach(n => {
+        totalActions++;
+        const key = `${type}_${n}`;
+        const isVerified = !!(verifyState[key] && verifyState[key].result);
+        if (isVerified) { verifiedActions++; return; }
+        const entry = byBlock[n] || {};
+        const eff = entry.eff && entry.eff !== 'TBD' ? entry.eff : '';
+        const due = entry.due && entry.due !== 'TBD' ? entry.due : '';
+        const effReached = !!(eff && new Date(eff) <= today);
+        const dueReached = !!(due && new Date(due) <= today);
+        if (effReached || dueReached) readyActions++;
+      });
+    });
+
+    const verifyStatusVal = resolveField(claim, ['verifyStatus', 'VerifyStatus'], '');
+    const isComplete = verifyStatusVal === 'Verified' || (totalActions > 0 && verifiedActions === totalActions);
+
+    return {
+      claim, runNo,
+      claimNo: cNo,
+      subject: resolveField(claim, ['Subject', 'subject'], 'N/A'),
+      shop: shopVal,
+      closeDateRaw, closeDateDisplay: closeDateRaw ? formatDateDisplay(closeDateRaw) : '—',
+      correctiveCount, preventiveCount,
+      totalActions, verifiedActions, readyActions, isComplete,
+      statusLabel: isComplete ? 'VERIFIED' : 'QC INVESTIGATED',
+    };
+  }
+
+  function verifyQueueSortValue(r, key) {
+    switch (key) {
+      case 'claimNo':   return r.runNo;
+      case 'closeDate': return r.closeDateRaw ? new Date(r.closeDateRaw).getTime() : null;
+      case 'corrective':return r.correctiveCount;
+      case 'preventive':return r.preventiveCount;
+      case 'ready':     return r.readyActions;
+      case 'progress':  return r.totalActions > 0 ? r.verifiedActions / r.totalActions : 0;
+      case 'status':    return r.statusLabel;
+      default:          return r[key];
+    }
+  }
+
+  function verifyQueueFilterValue(r, key) {
+    switch (key) {
+      case 'closeDate': return r.closeDateDisplay;
+      case 'corrective':return String(r.correctiveCount || 0);
+      case 'preventive':return String(r.preventiveCount || 0);
+      case 'ready':     return r.readyActions > 0 ? `${r.readyActions} Ready` : 'None due';
+      case 'progress':  return r.isComplete ? 'Complete' : `${r.verifiedActions}/${r.totalActions} Verified`;
+      case 'status':    return r.statusLabel;
+      default:          return r[key];
+    }
+  }
+
+  /** Re-derives the visible rows from verifyQueueList using the current
+   *  sort/filter state and repaints <tbody> — same pattern as
+   *  renderClaimsTable(). Call this (not fetchVerifyQueue) whenever only
+   *  the sort/filter state changes, so re-sorting doesn't refetch claims.js. */
+  function renderVerifyQueueTable() {
+    const tbody = document.getElementById('verifyQueueBody');
+    if (!tbody) return;
+
+    if (!verifyQueueList.length) {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--charcoal-soft);">No claims are currently awaiting verification.</td></tr>';
+      return;
+    }
+
+    let rows = verifyQueueList.map((c, i) => getVerifyRowModel(c, i));
+
+    Object.keys(verifyQueueColumnFilters).forEach(key => {
+      const allowed = verifyQueueColumnFilters[key];
+      if (!allowed) return;
+      rows = rows.filter(r => allowed.has(verifyQueueFilterValue(r, key)));
+    });
+
+    const { key: sortKey, dir } = verifyQueueSortState;
+    if (sortKey) {
+      rows = rows.slice().sort((a, b) => {
+        const av = verifyQueueSortValue(a, sortKey), bv = verifyQueueSortValue(b, sortKey);
+        const aEmpty = av === null || av === undefined || av === '';
+        const bEmpty = bv === null || bv === undefined || bv === '';
+        let cmp;
+        if (aEmpty && bEmpty) cmp = 0;
+        else if (aEmpty) cmp = 1;
+        else if (bEmpty) cmp = -1;
+        else if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+        else cmp = String(av).localeCompare(String(bv));
+        return dir === 'asc' ? cmp : -cmp;
+      });
+    }
+
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--charcoal-soft);">No claims match the current filters.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = '';
+    rows.forEach(r => {
+      const readyHtml = r.readyActions > 0
+        ? `<span class="status-badge" style="background:#fff3cd;color:#8a6d1e;border:1px solid #f0d896;">🔔 ${r.readyActions} Ready</span>`
+        : '<span style="color:var(--charcoal-soft);font-size:10px;">—</span>';
+
+      const pct = r.totalActions > 0 ? Math.round((r.verifiedActions / r.totalActions) * 100) : 0;
+      const progressHtml = r.totalActions === 0
+        ? '<span style="color:var(--charcoal-soft);font-size:10px;">No actions</span>'
+        : r.isComplete
+          ? '<span class="status-badge status-verified">✅ Complete</span>'
+          : `
+            <div style="display:flex; align-items:center; gap:6px;">
+              <div style="width:56px; height:6px; border-radius:3px; background:var(--surface-2); overflow:hidden; flex-shrink:0;">
+                <div style="width:${pct}%; height:100%; background:var(--red);"></div>
+              </div>
+              <span style="font-size:10.5px; font-weight:700; white-space:nowrap;">${r.verifiedActions}/${r.totalActions}</span>
+            </div>`;
+
+      const statusBadgeHtml = r.isComplete
+        ? '<span class="status-badge status-verified">VERIFIED</span>'
+        : '<span class="status-badge status-done">QC INVESTIGATED</span>';
+
+      const tr = document.createElement('tr');
+      tr.style.cursor = 'pointer';
+      tr.onclick = () => openVerifyWorkspace(r.claim);
+      tr.innerHTML = `
+        <td style="font-weight:800;color:var(--red);white-space:nowrap;font-size:12px;">${r.claimNo}</td>
+        <td style="font-weight:700;">${r.subject}</td>
+        <td style="font-size:11px;">${r.shop}</td>
+        <td style="font-size:11px;white-space:nowrap;">${r.closeDateDisplay}</td>
+        <td style="font-size:11px;text-align:center;">${r.correctiveCount || '—'}</td>
+        <td style="font-size:11px;text-align:center;">${r.preventiveCount || '—'}</td>
+        <td style="text-align:center;">${readyHtml}</td>
+        <td>${progressHtml}</td>
+        <td>${statusBadgeHtml}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    updateVerifyQueueHeaderIndicators();
+  }
+
+  /* Adds a ▾ sort/filter menu button to each Verify-queue <th> once —
+     same pattern as initClaimsTableHeaderControls(). */
+  function initVerifyQueueHeaderControls() {
+    const headRow = document.querySelector('#verifyQueueView .data-table thead tr');
+    if (!headRow || headRow.dataset.controlsInit) return;
+    headRow.dataset.controlsInit = '1';
+    headRow.querySelectorAll('th').forEach((th, idx) => {
+      const col = VERIFY_QUEUE_COLUMNS[idx];
+      if (!col) return;
+      th.classList.add('sortable-th');
+      const label = th.textContent.trim();
+      th.innerHTML = `<span class="th-label">${label}</span><button type="button" class="th-menu-btn" data-col="${col.key}" title="Sort / filter">▾</button>`;
+      th.querySelector('.th-menu-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleVerifyQueueColumnMenu(col.key, th);
+      });
+    });
+    document.addEventListener('click', closeVerifyQueueColumnMenu);
+  }
+
+  function updateVerifyQueueHeaderIndicators() {
+    document.querySelectorAll('#verifyQueueView .data-table thead th.sortable-th').forEach(th => {
+      const key = th.querySelector('.th-menu-btn')?.dataset.col;
+      th.classList.toggle('th-sort-asc', verifyQueueSortState.key === key && verifyQueueSortState.dir === 'asc');
+      th.classList.toggle('th-sort-desc', verifyQueueSortState.key === key && verifyQueueSortState.dir === 'desc');
+      th.classList.toggle('th-filtered', !!verifyQueueColumnFilters[key]);
+    });
+  }
+
+  function closeVerifyQueueColumnMenu() {
+    document.querySelectorAll('.th-filter-menu').forEach(m => m.remove());
+    document.querySelectorAll('.sortable-th.th-menu-open').forEach(th => th.classList.remove('th-menu-open'));
+    verifyQueueOpenMenuKey = null;
+  }
+
+  function toggleVerifyQueueColumnMenu(key, th) {
+    const wasOpen = verifyQueueOpenMenuKey === key;
+    closeVerifyQueueColumnMenu();
+    if (wasOpen) return;
+    verifyQueueOpenMenuKey = key;
+    th.classList.add('th-menu-open');
+
+    const rows = verifyQueueList.map((c, i) => getVerifyRowModel(c, i));
+    const values = Array.from(new Set(rows.map(r => verifyQueueFilterValue(r, key)).filter(v => v !== undefined && v !== null && v !== '')))
+      .sort((a, b) => String(a).localeCompare(String(b)));
+    const selected = verifyQueueColumnFilters[key];
+
+    const menu = document.createElement('div');
+    menu.className = 'th-filter-menu';
+    menu.addEventListener('click', e => e.stopPropagation());
+    menu.innerHTML = `
+      <div class="th-filter-sort">
+        <button type="button" data-action="sort-asc">↑ Sort Ascending</button>
+        <button type="button" data-action="sort-desc">↓ Sort Descending</button>
+      </div>
+      <div class="th-filter-search"><input type="text" class="form-control" placeholder="Search…"></div>
+      <div class="th-filter-list">
+        ${values.map(v => `<label class="th-filter-opt"><input type="checkbox" value="${escapeHtml(v)}" ${(!selected || selected.has(v)) ? 'checked' : ''}><span>${escapeHtml(v)}</span></label>`).join('') || '<div class="th-filter-empty">No values</div>'}
+      </div>
+      <div class="th-filter-actions">
+        <button type="button" data-action="select-all">Select All</button>
+        <button type="button" data-action="clear">Clear</button>
+        <button type="button" data-action="apply" class="th-filter-apply">Apply</button>
+      </div>`;
+    document.body.appendChild(menu);
+    const btnRect = th.querySelector('.th-menu-btn').getBoundingClientRect();
+    const menuWidth = 220;
+    let left = btnRect.right - menuWidth;
+    left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8));
+    menu.style.position = 'fixed';
+    menu.style.top = `${btnRect.bottom + 4}px`;
+    menu.style.left = `${left}px`;
+    menu.style.marginTop = '0';
+
+    menu.querySelector('[data-action="sort-asc"]').onclick = () => { verifyQueueSortState = { key, dir: 'asc' }; renderVerifyQueueTable(); closeVerifyQueueColumnMenu(); };
+    menu.querySelector('[data-action="sort-desc"]').onclick = () => { verifyQueueSortState = { key, dir: 'desc' }; renderVerifyQueueTable(); closeVerifyQueueColumnMenu(); };
+    menu.querySelector('[data-action="select-all"]').onclick = () => { menu.querySelectorAll('.th-filter-opt input').forEach(cb => cb.checked = true); };
+    menu.querySelector('[data-action="clear"]').onclick = () => { menu.querySelectorAll('.th-filter-opt input').forEach(cb => cb.checked = false); };
+    const searchInput = menu.querySelector('.th-filter-search input');
+    if (searchInput) searchInput.addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase();
+      menu.querySelectorAll('.th-filter-opt').forEach(opt => {
+        opt.style.display = opt.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    });
+    menu.querySelector('[data-action="apply"]').onclick = () => {
+      const checked = Array.from(menu.querySelectorAll('.th-filter-opt input:checked')).map(cb => cb.value);
+      if (checked.length === values.length) delete verifyQueueColumnFilters[key];
+      else verifyQueueColumnFilters[key] = new Set(checked);
+      renderVerifyQueueTable();
+      closeVerifyQueueColumnMenu();
+    };
+
+    requestAnimationFrame(() => {
+      if (verifyQueueOpenMenuKey !== key) return;
+      const wrap = document.querySelector('#verifyQueueView .claims-table-wrap');
+      if (wrap) wrap.addEventListener('scroll', closeVerifyQueueColumnMenu, { once: true });
+    });
+  }
+
   /** Loads claims.js fresh and renders every "QC Investigated" claim into
-   *  the queue table — same refresh-button pattern as Active Claims Queue. */
+   *  the queue table — same refresh-button pattern as Active Claims Queue.
+   *  Sorted latest-claim-first by default, with per-column sort/filter (see
+   *  renderVerifyQueueTable()/initVerifyQueueHeaderControls() above). */
   function fetchVerifyQueue() {
     const tbody = document.getElementById('verifyQueueBody');
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;">Loading claims awaiting verification...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;">Loading claims awaiting verification...</td></tr>';
 
     loadDataScript('claims.js', ['ACTIVE_CLAIMS_DATABASE']).then((result) => {
       if (!Array.isArray(result.ACTIVE_CLAIMS_DATABASE)) throw new Error('ACTIVE_CLAIMS_DATABASE not found in claims.js');
@@ -7268,56 +7558,17 @@
       // verified — a verified claim stays visible here (with a VERIFIED
       // badge, see below) so it can still be reopened for review, instead
       // of disappearing once done.
-      const queue = activeClaimsList.filter(c => {
+      verifyQueueList = activeClaimsList.filter(c => {
         const raw = c.status ?? c.Status ?? c.ClaimStatus ?? c.Claim_Status ?? null;
         const val = raw === null ? '' : (typeof raw === 'object' ? (raw.Value || raw.value || '') : String(raw).trim());
         return val === 'QC Investigated';
       });
 
-      if (!queue.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--charcoal-soft);">No claims are currently awaiting verification.</td></tr>';
-        return;
-      }
-
-      tbody.innerHTML = '';
-      queue.forEach((claim, i) => {
-        const runNo = claim.index_running_no || claim.IndexRunningNo || claim.index || claim.Index || (i + 1);
-        const cNo = buildClaimNo(runNo, resolveField(claim, ['issueDate', 'IssueDate'], ''));
-
-        var shopVal = '—';
-        var _shopRaw = claim.shopConcerned || claim.ShopConcerned || claim.ClaimShop || claim.claimShop || '';
-        try {
-          var sc = JSON.parse(_shopRaw);
-          if (Array.isArray(sc) && sc.length > 0) shopVal = sc.join(', ');
-          else if (typeof sc === 'string' && sc.trim()) shopVal = sc.trim();
-        } catch (_) { if (_shopRaw && _shopRaw.trim()) shopVal = _shopRaw.trim(); }
-
-        const closeDateRaw = claim.CloseDate || claim.closeDate;
-        const apText = resolveField(claim, ['actionPlan', 'ActionPlan', 'action_plan'], '');
-        const correctiveCount = Object.keys(_extractActionTextByBlock(apText, 'Corrective')).length;
-        const preventiveCount = Object.keys(_extractActionTextByBlock(apText, 'Preventive')).length;
-        const verifyStatusVal = resolveField(claim, ['verifyStatus', 'VerifyStatus'], '');
-        const verifyBadgeHtml = verifyStatusVal === 'Verified'
-          ? '<span class="status-badge status-verified">VERIFIED</span>'
-          : '<span class="status-badge status-done">QC INVESTIGATED</span>';
-
-        const tr = document.createElement('tr');
-        tr.style.cursor = 'pointer';
-        tr.onclick = () => openVerifyWorkspace(claim);
-        tr.innerHTML = `
-          <td style="font-weight:800;color:var(--red);white-space:nowrap;font-size:12px;">${cNo}</td>
-          <td style="font-weight:700;">${resolveField(claim, ['Subject', 'subject'], 'N/A')}</td>
-          <td style="font-size:11px;">${shopVal}</td>
-          <td style="font-size:11px;white-space:nowrap;">${closeDateRaw ? formatDateDisplay(closeDateRaw) : '—'}</td>
-          <td style="font-size:11px;text-align:center;">${correctiveCount || '—'}</td>
-          <td style="font-size:11px;text-align:center;">${preventiveCount || '—'}</td>
-          <td>${verifyBadgeHtml}</td>
-        `;
-        tbody.appendChild(tr);
-      });
+      initVerifyQueueHeaderControls();
+      renderVerifyQueueTable();
     }).catch((e) => {
       console.error('[fetchVerifyQueue] Failed to load claims.js:', e);
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:red;">Error loading claims.js</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:red;">Error loading claims.js</td></tr>';
     });
   }
 
