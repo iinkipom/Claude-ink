@@ -113,21 +113,44 @@
         <!-- ═══════════════ NEW Q FLOW SMART LOGO ═══════════════ -->
         <div class="flex items-center gap-5 mb-12 select-none group">
           
-          <!-- Animated Logo Icon -->
-          <div class="relative flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-[#DA0037] to-[#7a001c] shadow-[0_8px_30px_rgba(218,0,55,0.4)] overflow-hidden shrink-0 transition-all duration-500 group-hover:shadow-[0_8px_40px_rgba(218,0,55,0.6)] group-hover:-translate-y-0.5">
-            
-            <!-- Rotating ambient glow -->
-            <div class="absolute w-[150%] h-[150%] bg-[conic-gradient(from_0deg,transparent_0_280deg,rgba(255,255,255,0.4)_360deg)] animate-spin-slow opacity-60"></div>
-            <div class="absolute inset-[1.5px] rounded-xl bg-gradient-to-br from-[#DA0037] to-[#6b0018]"></div>
-
-            <svg width="34" height="34" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" class="relative z-10">
-              <!-- Continuous quality flow: an open ring (gather -> respond ->
-                   investigate -> verify, looping back to start) with a
-                   leading node marking forward motion around the loop. -->
-              <circle cx="20" cy="20" r="12" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" fill="none" stroke-dasharray="56.5 18.9" transform="rotate(45 20 20)"></circle>
-              <circle cx="28.5" cy="11.5" r="2.6" fill="#ffffff"></circle>
-              <!-- Checkmark: verified / customer satisfaction -->
-              <path d="M14 20.5L18 24.5L27 14.5" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></path>
+          <!-- Isometric Logo Icon — hex "Q" block (white/charcoal-soft/charcoal
+               faces) with a red gradient ribbon flowing through a gap in the
+               frame and trailing off, echoing the standalone brand mark
+               (qflow-logo-isometric.svg) at a size that reads clearly next
+               to the wordmark. -->
+          <div class="relative flex items-center justify-center w-24 h-24 shrink-0 transition-transform duration-500 group-hover:-translate-y-0.5">
+            <svg viewBox="171 80 809 757" xmlns="http://www.w3.org/2000/svg" class="w-full h-full drop-shadow-[0_8px_20px_rgba(0,0,0,0.4)]">
+              <defs>
+                <linearGradient id="qflowRibbonGrad" x1="400.0,178.5" x2="809.6,706.8" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stop-color="#ff4d6d"/>
+                  <stop offset="45%" stop-color="#DA0037"/>
+                  <stop offset="100%" stop-color="#DA0037" stop-opacity="0"/>
+                </linearGradient>
+                <filter id="qflowSoftBlur"><feGaussianBlur stdDeviation="9"/></filter>
+              </defs>
+              <!-- Recessed hole floor -->
+              <path d="M400.0,340.0 L235.5,245.0 L400.0,150.0 L564.5,245.0 Z" fill="#d6d6d6"/>
+              <path d="M400.0,340.0 L400.0,530.0 L235.5,435.0 L235.5,245.0 Z" fill="#9a9a9a"/>
+              <path d="M400.0,340.0 L564.5,245.0 L564.5,435.0 L400.0,530.0 Z" fill="#242424"/>
+              <!-- Glow behind the ribbon -->
+              <path d="M400.0,178.5 C453.5,228.4 507.0,278.2 507.0,278.2 C508.3,392.5 509.6,506.8 509.6,506.8 C563.6,539.8 599.6,561.8 599.6,561.8 C649.6,599.2 699.6,636.8 699.6,636.8 L809.6,706.8" fill="none" stroke="#DA0037" stroke-width="42" stroke-linecap="round" opacity="0.35" filter="url(#qflowSoftBlur)"/>
+              <!-- Ring (the Q body) -->
+              <path d="M200.8,225.0 L400.0,110.0 L599.2,225.0 L564.5,245.0 L400.0,150.0 L235.5,245.0 Z" fill="#FFFFFF"/>
+              <path d="M400.0,570.0 L200.8,455.0 L200.8,225.0 L235.5,245.0 L235.5,435.0 L400.0,530.0 Z" fill="#444444"/>
+              <path d="M599.2,225.0 L599.2,455.0 L543.4,487.2 L518.5,461.6 L564.5,435.0 L564.5,245.0 Z" fill="#2f2f2f"/>
+              <path d="M475.7,526.3 L400.0,570.0 L400.0,530.0 L462.5,493.9 Z" fill="#2f2f2f"/>
+              <!-- Ribbon (flow / Q tail) on top -->
+              <path d="M400.0,178.5 C453.5,228.4 507.0,278.2 507.0,278.2 C508.3,392.5 509.6,506.8 509.6,506.8 C563.6,539.8 599.6,561.8 599.6,561.8 C649.6,599.2 699.6,636.8 699.6,636.8 L809.6,706.8" fill="none" stroke="url(#qflowRibbonGrad)" stroke-width="30" stroke-linecap="round"/>
+              <path d="M400.0,178.5 C453.5,228.4 507.0,278.2 507.0,278.2 C508.3,392.5 509.6,506.8 509.6,506.8 C563.6,539.8 599.6,561.8 599.6,561.8 C649.6,599.2 699.6,636.8 699.6,636.8 L809.6,706.8" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.5"/>
+              <!-- Motion trail dashes past the tip -->
+              <circle cx="859.55" cy="739.75" r="8" fill="#DA0037" opacity="0.55"/>
+              <circle cx="901.55" cy="767.75" r="5.5" fill="#DA0037" opacity="0.3"/>
+              <circle cx="937.55" cy="791.75" r="3.5" fill="#DA0037" opacity="0.15"/>
+              <!-- Silhouette edge (keeps the block defined against any background) -->
+              <path d="M200.8,225.0 L400.0,110.0 L599.2,225.0 L599.2,455.0 L400.0,570.0 L200.8,455.0 Z" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
+              <!-- Edge highlight lines for crispness -->
+              <path d="M200.8,225.0 L400.0,110.0 L599.2,225.0" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.6"/>
+              <path d="M235.5,245.0 L400.0,150.0 L564.5,245.0" fill="none" stroke="#ffffff" stroke-width="1.5" opacity="0.5"/>
             </svg>
           </div>
 
