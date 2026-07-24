@@ -3806,6 +3806,48 @@
     });
   }
 
+  /** Re-fetches claims.js immediately before a Verify Claim submit and
+   *  refreshes the saved-evidence views (verificationDocUrlStore, and the
+   *  DOM <img> previews _resolveExistingPhotosForSave falls back to) from
+   *  it — narrows the write-vs-refresh race documented at
+   *  installWriteTracker() above. Without this, a workspace left open
+   *  since claims.js was last loaded (which can be hours — there's no
+   *  polling, only page-load/F5) resends whatever evidence IT knew about
+   *  at open time; since SAVE_VERIFICATION_URL writes VerificationDocuments/
+   *  VerificationImages as a full replace rather than an append, that stale
+   *  resend silently erases any document/photo a DIFFERENT user attached to
+   *  a DIFFERENT action on the same claim in the meantime (reported bug:
+   *  Rampai's submit wiped Tanachit's and Sujit's already-saved
+   *  VerificationDocuments entries). This only narrows the window (down to
+   *  "as fresh as claims.js is on disk right now") — it can't close it
+   *  completely, since two submits from different stale sessions can still
+   *  race each other within that window. The complete fix has to be on the
+   *  SAVE_VERIFICATION_URL flow itself: read the Microsoft List item's
+   *  CURRENT VerificationDocuments/VerificationImages value live and merge
+   *  newly-uploaded files into it, instead of overwriting wholesale with
+   *  whatever the client's payload contains.
+   *  Deliberately does NOT touch verifyState (this visit's in-progress
+   *  OK/NG decisions) — only the read-only saved-evidence view. Failure is
+   *  non-fatal: falls back to whatever was already loaded. */
+  async function _refreshVerificationEvidenceStores() {
+    try {
+      const result = await loadDataScript('claims.js', ['ACTIVE_CLAIMS_DATABASE']);
+      const list = Array.isArray(result.ACTIVE_CLAIMS_DATABASE) ? result.ACTIVE_CLAIMS_DATABASE : [];
+      const fresh = list.find(c => String(c.id || c.ID) === String(selectedClaimId));
+      if (!fresh) return;
+      const freshDocs = fresh.verificationDocuments || fresh.VerificationDocuments || '';
+      const freshImgs = fresh.verificationImages || fresh.VerificationImages || '';
+      if (selectedClaimData) {
+        selectedClaimData.verificationDocuments = freshDocs;
+        selectedClaimData.verificationImages = freshImgs;
+      }
+      _populateVerificationDocUrlStore(freshDocs);
+      _restoreVerificationPhotosFromUrls(freshImgs);
+    } catch (e) {
+      console.warn('[submitVerification] could not refresh evidence stores before submit — proceeding with locally cached data:', e);
+    }
+  }
+
   /** Submit-time equivalent of _resolveExistingPhotosForSave() for
    *  documents: re-fetches every already-saved doc (verificationDocUrlStore)
    *  and converts it to base64 alongside this session's fresh picks
@@ -8022,6 +8064,7 @@
     const statusMsg = document.getElementById('verifyStatusMsg'); statusMsg.textContent = '';
 
     try {
+      await _refreshVerificationEvidenceStores();
       let vData = [];
       let verifyImgs = [];
       let verifyDocs = [];
