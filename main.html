@@ -4331,10 +4331,11 @@
 
   /* ── Subject 1: Checks Per Day ──────────────────────────────────────────
      TL span: StartDate → CloseDate.  Player span: StartDate → my first
-     Finding Risk timestamp.  18 ranked combinations: within Day<=1 the
-     "checks=1 vs checks>=2" manual input splits the ranking in two (hours
-     is the outer axis there); Day 2-5 don't use the checks input — this
-     mirrors the worked examples given (row 1 = best/max, row 18 = worst/min). */
+     Finding Risk timestamp.  30 ranked combinations (revised per Smart QC
+     SelfEvaluation Scoring Criteria.xlsx, Subj1 Checks Per Day, Table 1):
+     the "checks=1 vs checks>=2" manual input now splits the ranking in two
+     at EVERY day bucket (0-4), not just Day idx 0 — checksPerDay is the
+     innermost axis, hours the middle axis, day the outermost axis. */
   function computeChecksPerDayScore(claim, role, checksPerDay) {
     if (isLowTierFixedScore(claim)) return { score: 2, fixed: true };
     const range = getEvaluateScoreRange(claim);
@@ -4345,29 +4346,68 @@
     }
     const days = calculateClaimTakeTime(start, end), hours = _hoursBetween(start, end);
     const dayIdx = _dayRankIndex(days), hrsIdx = _hoursRankIndex(hours);
-    const rank = (dayIdx === 0) ? (hrsIdx * 2 + (Number(checksPerDay) >= 2 ? 1 : 0)) : (6 + (dayIdx - 1) * 3 + hrsIdx);
-    return { score: _interpScore(rank, 18, range), days, hours };
+    const rank = dayIdx * 6 + hrsIdx * 2 + (Number(checksPerDay) >= 2 ? 1 : 0);
+    return { score: _interpScore(rank, 30, range), days, hours };
+  }
+
+  /** Counts filled "Why N: ..." lines in a Trouble Analysis text blob (the
+   *  rootCauseAnalysis/outflowAnalysis fields written by submitTroubleAnalysis()
+   *  — see ~line 2863) — this IS the "Root Cause quantity" / "Outflow
+   *  quantity" that Subject 2 auto-calculates from (Smart QC SelfEvaluation
+   *  Scoring Criteria.xlsx, Subj2 Root Cause, Table 2): how many "5 Whys"
+   *  steps were actually filled in for that claim. */
+  function _countWhyEntries(text) {
+    if (!text) return 0;
+    const matches = String(text).match(/^Why\s+\d+:/gmi);
+    return matches ? matches.length : 0;
+  }
+
+  /** Maps a (Root Cause quantity, Outflow quantity) pair — each clamped to
+   *  1..5, where 5 means ">=5" — to its 0..24 position in Table 2's ordered
+   *  25-combo block, exactly reproducing the workbook's hand-built order:
+   *  primary sort by max(rc,out) descending, then min(rc,out) descending,
+   *  then (when rc≠out at the same max/min) whichever of the two is Root
+   *  Cause ranks first — Root Cause is weighted more heavily than Outflow,
+   *  matching the workbook (e.g. RC=4,Out=3 scores higher than RC=3,Out=4).
+   *  Derived from, and verified against, every one of the 25 rows in Table 2. */
+  function _rootCauseOutflowComboRank(rcQty, outQty) {
+    const rc = Math.max(1, Math.min(5, rcQty));
+    const out = Math.max(1, Math.min(5, outQty));
+    const M = Math.max(rc, out), m = Math.min(rc, out);
+    let posInBlock;
+    if (rc === out) posInBlock = 0;
+    else if (rc === M) posInBlock = 1 + 2 * (M - 1 - m);
+    else posInBlock = 2 + 2 * (M - 1 - m);
+    return (25 - M * M) + posInBlock;
   }
 
   /* ── Subject 2: Root Cause / Outflow Analysis ───────────────────────────
      TL span: StartDate → earliest Finding Risk log timestamp (across all
      players — TL has no Finding Risk entries of their own). Player span:
      StartDate → my own first Finding Risk timestamp. Both reuse the SAME
-     findingRiskLog data Subject 1/3 already use — confirmed, no separate
-     "Trouble Analysis submitted" column needed. Result tier: Found Root
-     Cause + Found Outflow (better half) vs Found Root Cause + NOT Found
-     Outflow (worse half). Root cause not found at all isn't scorable yet
-     (no data rows given for that case). */
-  function computeTroubleAnalysisScore(claim, role, foundRoot, foundOutflow) {
+     findingRiskLog data Subject 1/3 already use.
+     AUTO (revised per Smart QC SelfEvaluation Scoring Criteria.xlsx, Subj2
+     Root Cause, Table 2) — no more manual "พบ/ไม่พบ" toggle. Root Cause
+     quantity and Outflow quantity are both read straight from the Trouble
+     Analysis step's already-saved data (rootCauseAnalysis/outflowAnalysis),
+     counted via _countWhyEntries(). Root cause quantity 0 (nothing filled
+     in at all) isn't scorable yet; Outflow quantity 0 is scorable (treated
+     the same as quantity 1, the worst bucket) since the workbook's Table 2
+     only defines buckets 1-4/>=5 and the original design never blocked
+     scoring on outflow alone being absent. */
+  function computeTroubleAnalysisScore(claim, role) {
     if (isLowTierFixedScore(claim)) return { score: 2, fixed: true };
     const range = getEvaluateScoreRange(claim);
-    if (!foundRoot) return { score: null, reason: 'Root cause not yet confirmed — this subject scores once a real root cause is found.' };
+    const rcQty  = _countWhyEntries(resolveField(claim, ['rootCauseAnalysis', 'RootCauseAnalysis', 'troubleAnalysis', 'TroubleAnalysis'], ''));
+    if (rcQty < 1) return { score: null, reason: 'Root cause not yet confirmed — this subject scores once at least 1 root cause "Why" step is filled in.' };
+    const outQty = _countWhyEntries(resolveField(claim, ['outflowAnalysis', 'OutflowAnalysis', 'outFlow'], ''));
     const start = claim && (claim.startDate || claim.StartDate);
     const end   = (role === 'Team Leader') ? _firstFindingRiskTimestampOverall(claim) : _myFirstFindingRiskTimestamp(claim);
     if (!start || !end) return { score: null, reason: 'Missing StartDate or Finding Risk timestamp — cannot calculate yet.' };
     const days = calculateClaimTakeTime(start, end), hours = _hoursBetween(start, end);
-    const rank = (foundOutflow ? 0 : 15) + _dayRankIndex(days) * 3 + _hoursRankIndex(hours);
-    return { score: _interpScore(rank, 30, range), days, hours };
+    const comboRank = _rootCauseOutflowComboRank(rcQty, outQty);
+    const rank = (_dayRankIndex(days) * 3 + _hoursRankIndex(hours)) * 25 + comboRank;
+    return { score: _interpScore(rank, 375, range), days, hours };
   }
 
   /* ── Subject 3: Response Speed (AUTO — no manual input) ─────────────────
@@ -4403,15 +4443,23 @@
      Team Leader span: earliest Finding Risk timestamp → CloseDate, gated
      on an appointment (meetingDate) existing.
      Player span: for every action they're the assigned "verify person" on
-     (Verify Claim's per-action assignment — see openVerifyWorkspace),
-     once that action's own Effective Date has been reached, from that
-     Effective Date → the timestamp they actually submitted their
-     verification (evidence + OK/NG). A player with several qualifying
-     actions on this claim gets the average of each action's own score —
-     same "average per-bucket, not per-item" convention as the radar
-     chart's weekly/monthly buckets. An action whose Effective Date hasn't
-     been reached yet, or where this player isn't assigned anything at
-     all, doesn't count against them yet. */
+     (Verify Claim's per-action assignment — see openVerifyWorkspace), once
+     BOTH that action's own Effective Date has been reached AND they've
+     actually been assigned, from whichever of those two happened LATER →
+     the timestamp they actually submitted their verification (evidence +
+     OK/NG). Revised per user request: if the Effective Date passed before
+     the Team Leader got around to assigning someone, the clock now starts
+     at the assignment time instead of the (earlier) Effective Date, so a
+     late assignment — not the player's doing — doesn't retroactively
+     penalize them. Uses verificationAssigneeTimestamps (see
+     _saveVerificationAssignees); a key with no recorded assignment time
+     (assigned before this feature existed) falls back to the Effective
+     Date alone, same as before. A player with several qualifying actions
+     on this claim gets the average of each action's own score — same
+     "average per-bucket, not per-item" convention as the radar chart's
+     weekly/monthly buckets. An action whose clock-start hasn't been
+     reached yet, or where this player isn't assigned anything at all,
+     doesn't count against them yet. */
   function computeNotifyShopScore(claim, role) {
     if (isLowTierFixedScore(claim)) return { score: 2, fixed: true };
     const range = getEvaluateScoreRange(claim);
@@ -4422,6 +4470,7 @@
 
       const apText = resolveField(claim, ['actionPlan', 'ActionPlan', 'action_plan'], '');
       const timestamps = _getVerificationTimestamps(claim);
+      const assignedAt = _getVerificationAssigneeTimestamps(claim);
       const today = new Date(); today.setHours(0, 0, 0, 0);
 
       let anyReached = false;
@@ -4432,16 +4481,19 @@
         const eff = entry && entry.eff && entry.eff !== 'TBD' ? entry.eff : null;
         if (!eff) return; // no Effective Date set on this action — not measurable
         const effDate = new Date(eff); effDate.setHours(0, 0, 0, 0);
-        if (effDate > today) return; // Effective Date not reached yet — doesn't count yet
+        const assignedRaw = assignedAt[key];
+        const assignedDate = assignedRaw ? new Date(assignedRaw) : null;
+        const clockStart = (assignedDate && assignedDate > effDate) ? assignedDate : effDate;
+        if (clockStart > today) return; // neither Effective Date nor assignment has happened yet — doesn't count yet
         anyReached = true;
         const ts = timestamps[key];
         if (!ts) return; // reached, but this player hasn't submitted their verification yet
-        const days = calculateClaimTakeTime(eff, ts), hours = _hoursBetween(eff, ts);
+        const days = calculateClaimTakeTime(clockStart, ts), hours = _hoursBetween(clockStart, ts);
         const rank = _dayRankIndex(days) * 3 + _hoursRankIndex(hours);
         scores.push(_interpScore(rank, 15, range));
       });
 
-      if (!anyReached) return { score: null, reason: 'ยังไม่ถึงวันที่ Effective Date ของ Action ที่คุณรับผิดชอบ' };
+      if (!anyReached) return { score: null, reason: 'ยังไม่ถึงวันที่ Effective Date หรือยังไม่ได้รับมอบหมาย Action ที่คุณรับผิดชอบ' };
       if (!scores.length) return { score: null, reason: 'รอการยืนยันผลตรวจสอบ (Verify) ของคุณใน Action ที่ถึงกำหนดแล้ว' };
       return { score: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) };
     }
@@ -4461,16 +4513,17 @@
     {
       key:       'evalTimeStatus',
       title:     'จำนวนครั้งที่คุณตรวจสอบสถานะงานเคลมเคสนี้เป็นกี่ครั้งต่อวัน เกณฑ์ขั้นต่ำจะต้องมากกว่า 2 ครั้งต่อวัน',
-      detail:    'เลือกจำนวนครั้งโดยเฉลี่ยที่คุณตรวจสอบสถานะเคลมเคสนี้ต่อวัน (มีผลต่อคะแนนเฉพาะกรณีดำเนินการเสร็จภายในวันแรก)',
+      detail:    'เลือกจำนวนครั้งโดยเฉลี่ยที่คุณตรวจสอบสถานะเคลมเคสนี้ต่อวัน',
       inputType: 'checksPerDay',
       appliesTo: ['Team Leader', 'Player']
     },
     {
-      key:       'evalRiskAnalysis',
-      title:     'คุณสามารถวิเคราะห์หาสาเหตุของปัญหางานเคลมที่แท้จริงได้ภายใน 1 วัน (สาเหตุที่แท้จริงของปัญหา กับ สาเหตุที่ปัญหาหลุดออกไปจากสายการผลิตได้)',
-      detail:    'ระบุผลการวิเคราะห์ Root Cause และ Outflow ของเคลมเคสนี้',
-      inputType: 'troubleResult',
-      appliesTo: ['Team Leader', 'Player']
+      key:        'evalRiskAnalysis',
+      title:      'คุณสามารถวิเคราะห์หาสาเหตุของปัญหางานเคลมที่แท้จริงได้ภายใน 1 วัน (สาเหตุที่แท้จริงของปัญหา กับ สาเหตุที่ปัญหาหลุดออกไปจากสายการผลิตได้)',
+      detail:     'คะแนนนี้คำนวณอัตโนมัติจากจำนวน Root Cause และ Outflow ที่ระบุไว้แล้วในขั้นตอน Trouble Analysis ไม่ต้องกรอกข้อมูลเพิ่มเติม',
+      inputType:  'auto',
+      computeFn:  computeTroubleAnalysisScore,
+      appliesTo:  ['Team Leader', 'Player']
     },
     {
       key:        'evalResponseSpeed',
@@ -4776,28 +4829,6 @@
           <select class="form-control" style="max-width:260px;" onchange="updateChecksPerDay('${subj.key}', this.value)">${opts}</select>`;
         if (savedChecks) result = computeChecksPerDayScore(claim, role, savedChecks);
 
-      } else if (subj.inputType === 'troubleResult') {
-        const rootSet = saved.foundRoot !== undefined, outflowSet = saved.foundOutflow !== undefined;
-        evaluateInputs[subj.key] = { foundRoot: saved.foundRoot === true, foundOutflow: saved.foundOutflow === true };
-        inputHtml = `
-          <div style="display:flex; gap:24px; flex-wrap:wrap;">
-            <div>
-              <label style="font-size:12px; color:var(--charcoal-soft); display:block; margin-bottom:6px;">พบสาเหตุที่แท้จริงของปัญหา (Root Cause)?</label>
-              <div style="display:flex; gap:8px;">
-                <button type="button" class="eval-toggle-btn" data-active="${rootSet && saved.foundRoot === true}" onclick="updateTroubleResult('${subj.key}','foundRoot',true,this)">พบ</button>
-                <button type="button" class="eval-toggle-btn" data-active="${rootSet && saved.foundRoot === false}" onclick="updateTroubleResult('${subj.key}','foundRoot',false,this)">ไม่พบ</button>
-              </div>
-            </div>
-            <div>
-              <label style="font-size:12px; color:var(--charcoal-soft); display:block; margin-bottom:6px;">พบสาเหตุที่ปัญหาหลุดออกจากไลน์ผลิต (Outflow)?</label>
-              <div style="display:flex; gap:8px;">
-                <button type="button" class="eval-toggle-btn" data-active="${outflowSet && saved.foundOutflow === true}" onclick="updateTroubleResult('${subj.key}','foundOutflow',true,this)">พบ</button>
-                <button type="button" class="eval-toggle-btn" data-active="${outflowSet && saved.foundOutflow === false}" onclick="updateTroubleResult('${subj.key}','foundOutflow',false,this)">ไม่พบ</button>
-              </div>
-            </div>
-          </div>`;
-        if (rootSet) result = computeTroubleAnalysisScore(claim, role, saved.foundRoot === true, saved.foundOutflow === true);
-
       } else if (subj.inputType === 'meetingCount') {
         const savedCount = saved.count !== undefined ? String(saved.count) : '';
         evaluateInputs[subj.key] = { count: savedCount || undefined };
@@ -4843,7 +4874,7 @@
     wrap.appendChild(suggestionBlock);
   }
 
-  let evaluateInputs = {};   // raw manual inputs per subject key, e.g. { evalTimeStatus:{checks:'2'}, evalRiskAnalysis:{foundRoot:true,foundOutflow:false} }
+  let evaluateInputs = {};   // raw manual inputs per subject key, e.g. { evalTimeStatus:{checks:'2'}, evalMeetingAttendance:{count:'3'} }
   let evaluateScores = {};   // computed point value per subject key (what actually gets validated & submitted)
 
   /** Re-renders one subject's score badge after its input changes. */
@@ -4858,22 +4889,6 @@
     const role = getCurrentUserRoleOnClaim(selectedClaimData);
     evaluateInputs[key] = { checks: val || undefined };
     const result = val === '' ? { score: null, reason: 'กรุณาเลือกจำนวนครั้งต่อวัน' } : computeChecksPerDayScore(selectedClaimData, role, val);
-    _refreshSubjectBadge(key, result);
-  }
-
-  function updateTroubleResult(key, field, val, btnEl) {
-    const role = getCurrentUserRoleOnClaim(selectedClaimData);
-    if (!evaluateInputs[key]) evaluateInputs[key] = {};
-    evaluateInputs[key][field] = val;
-
-    const groupWrap = btnEl.parentElement; // the flex div holding both buttons for this one field
-    groupWrap.querySelectorAll('.eval-toggle-btn').forEach(b => b.setAttribute('data-active', b === btnEl ? 'true' : 'false'));
-    _styleToggleButtons(groupWrap);
-
-    const inputs = evaluateInputs[key];
-    const result = (inputs.foundRoot === undefined)
-      ? { score: null, reason: 'กรุณาเลือกผลการวิเคราะห์' }
-      : computeTroubleAnalysisScore(selectedClaimData, role, inputs.foundRoot === true, inputs.foundOutflow === true);
     _refreshSubjectBadge(key, result);
   }
 
@@ -7374,6 +7389,18 @@
     catch (_) { return {}; }
   }
 
+  /** When each `${type}_${num}` action was (most recently) assigned a
+   *  verify person — JSON map of key -> ISO timestamp, parallel to
+   *  verificationAssignees. Used by computeNotifyShopScore()'s Player
+   *  branch so a late assignment doesn't retroactively penalize the
+   *  assigned player for time that passed before they were even assigned.
+   *  Absent for a key means "assigned before this feature existed" — those
+   *  keys fall back to the Effective Date alone (see computeNotifyShopScore). */
+  function _getVerificationAssigneeTimestamps(claim) {
+    try { return JSON.parse(resolveField(claim || {}, ['verificationAssigneeTimestamps', 'VerificationAssigneeTimestamps'], '{}')) || {}; }
+    catch (_) { return {}; }
+  }
+
   /** DD/MM/YY HH:MM:SS — same display convention self-evaluation and
    *  Finding Risk timestamps already use elsewhere in this app, reused
    *  here for verificationLog's accumulated entries. */
@@ -7403,20 +7430,38 @@
   /** Immediately persists the CURRENT verifyState assignments (fire-and-
    *  forget, like confirmPlayers()/advanceClaimStatus()) so picking a
    *  verifier isn't lost if the Team Leader navigates away before hitting
-   *  "Submit Verification". Does NOT touch results/photos/status. */
+   *  "Submit Verification". Does NOT touch results/photos/status.
+   *  Also stamps verificationAssigneeTimestamps: a key gets "now" the
+   *  first time it gets an assignee, or whenever the assignee actually
+   *  CHANGES to a different person — reassigning restarts that action's
+   *  verify-speed clock for the newly assigned player. */
   async function _saveVerificationAssignees() {
     if (!selectedClaimId) return;
+    const prevAssignees = _getVerificationAssignees(selectedClaimData);
+    const assignedAt = _getVerificationAssigneeTimestamps(selectedClaimData);
+    const nowIso = new Date().toISOString();
     const assignees = {};
     Object.keys(verifyState).forEach(key => {
-      if (verifyState[key] && verifyState[key].assignee) assignees[key] = verifyState[key].assignee;
+      const a = verifyState[key] && verifyState[key].assignee;
+      if (!a) return;
+      assignees[key] = a;
+      const prev = prevAssignees[key];
+      const changed = !prev
+        || String(prev.empId || '') !== String(a.empId || '')
+        || `${prev.firstName || ''} ${prev.lastName || ''}`.trim() !== `${a.firstName || ''} ${a.lastName || ''}`.trim();
+      if (changed || !assignedAt[key]) assignedAt[key] = nowIso;
     });
     const assigneesJson = JSON.stringify(assignees);
-    if (selectedClaimData) selectedClaimData.verificationAssignees = assigneesJson;
+    const assignedAtJson = JSON.stringify(assignedAt);
+    if (selectedClaimData) {
+      selectedClaimData.verificationAssignees = assigneesJson;
+      selectedClaimData.verificationAssigneeTimestamps = assignedAtJson;
+    }
     if (SAVE_VERIFICATION_URL && !SAVE_VERIFICATION_URL.startsWith('PASTE_')) {
       try {
         await fetch(SAVE_VERIFICATION_URL, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: selectedClaimId.toString(), verificationAssignees: assigneesJson, tabSave: 'assignVerifier' })
+          body: JSON.stringify({ id: selectedClaimId.toString(), verificationAssignees: assigneesJson, verificationAssigneeTimestamps: assignedAtJson, tabSave: 'assignVerifier' })
         });
       } catch (e) { console.log('_saveVerificationAssignees (CORS suppressed):', e); }
     }
@@ -8076,6 +8121,8 @@
       // stamped with the current time.
       const timestamps = _getVerificationTimestamps(selectedClaimData);
       const assignees = {};
+      const prevAssignees = _getVerificationAssignees(selectedClaimData);
+      const assignedAt = _getVerificationAssigneeTimestamps(selectedClaimData);
       const nowIso = new Date().toISOString();
 
       for (const type of ['Corrective', 'Preventive']) {
@@ -8087,7 +8134,14 @@
           const key = `${type}_${num}`;
           const state = verifyState[key] || {};
           totalBlocks++;
-          if (state.assignee) assignees[key] = state.assignee;
+          if (state.assignee) {
+            assignees[key] = state.assignee;
+            const prev = prevAssignees[key];
+            const changed = !prev
+              || String(prev.empId || '') !== String(state.assignee.empId || '')
+              || `${prev.firstName || ''} ${prev.lastName || ''}`.trim() !== `${state.assignee.firstName || ''} ${state.assignee.lastName || ''}`.trim();
+            if (changed || !assignedAt[key]) assignedAt[key] = nowIso;
+          }
           if (state.result) {
             const reasonPart = state.result === 'NG' && state.reason ? `: ${state.reason}` : '';
             vData.push(`[${type} ${num}] ${state.result}${reasonPart}`);
@@ -8158,6 +8212,7 @@
         verifyStatus: verifyStatus,
         verificationData: verificationText,
         verificationAssignees: JSON.stringify(assignees),
+        verificationAssigneeTimestamps: JSON.stringify(assignedAt),
         verificationTimestamps: JSON.stringify(timestamps),
         verificationVideo: '[]', // evidence video link input was replaced by document attach — see verificationDocumentsBase64 below
         verificationImagesBase64: verifyImgs.map(obj => ({ name: obj.name, content: obj.dataUrl.split(',')[1] })),
@@ -8174,6 +8229,7 @@
       if (selectedClaimData) {
         selectedClaimData.verificationData = verificationText;
         selectedClaimData.verificationAssignees = payload.verificationAssignees;
+        selectedClaimData.verificationAssigneeTimestamps = payload.verificationAssigneeTimestamps;
         selectedClaimData.verificationTimestamps = payload.verificationTimestamps;
         selectedClaimData.verificationVideo = payload.verificationVideo;
         selectedClaimData.verificationLog = verificationLog;
