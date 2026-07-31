@@ -1247,6 +1247,29 @@
   //                                           5 (evalNotifySpeed) reads
   //                                           back for a Player's score —
   //                                           see computeNotifyShopScore().
+  //     verificationAssigneeTimestamps: string — JSON: {"Corrective_1":
+  //                                           "<ISO date>", ...} — when THAT
+  //                                           action was (most recently)
+  //                                           assigned a verify person. NEW
+  //                                           column, same JSON-string
+  //                                           pattern as verificationTimestamps
+  //                                           — add a matching
+  //                                           VerificationAssigneeTimestamps
+  //                                           column (same type as
+  //                                           VerificationTimestamps) and a
+  //                                           mapping in the "Select" action
+  //                                           that builds claims.js, next to
+  //                                           the existing verificationTimestamps
+  //                                           mapping. Also sent (alongside
+  //                                           verificationAssignees) in the
+  //                                           smaller { id, tabSave:
+  //                                           'assignVerifier' } payload
+  //                                           below — see computeNotifyShopScore()'s
+  //                                           Player branch for how this is
+  //                                           used (verify-speed clock starts
+  //                                           at max(Effective Date, this
+  //                                           timestamp), not Effective Date
+  //                                           alone).
   //     verificationVideo:         string  — always sent as "[]" now (the
   //                                           video-link input was replaced
   //                                           by document attachment below,
@@ -1302,10 +1325,11 @@
   //                                           so just overwrite the column
   //                                           with whatever's received.
   //   }
-  // Also fired with a smaller { id, verificationAssignees, tabSave:
-  // 'assignVerifier' } payload the instant a Team Leader assigns a verify
-  // person — before "Submit Verification" is ever clicked — so an
-  // assignment isn't lost if they navigate away first.
+  // Also fired with a smaller { id, verificationAssignees,
+  // verificationAssigneeTimestamps, tabSave: 'assignVerifier' } payload the
+  // instant a Team Leader assigns a verify person — before "Submit
+  // Verification" is ever clicked — so an assignment isn't lost if they
+  // navigate away first.
   // PASTE YOUR "SmartQC - VerifyClaim" PAD/Power Automate HTTP TRIGGER URL
   // BELOW — this is currently a placeholder, so submitVerification() will
   // save locally (selectedClaimData) and no-op the network call until you
