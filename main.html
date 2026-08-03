@@ -8847,9 +8847,22 @@
       const ts  = `${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getFullYear()).slice(-2)} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
 
       const subjects  = findingRiskBlocks.map(b => b.subject.trim());
+      // f.content is stored (handleFindingRiskFiles) as the FULL data URL
+      // ("data:<mime>;base64,<data>") since that's what a browser <img src>
+      // preview needs — but every other upload path in this app
+      // (verificationImagesBase64/verificationDocumentsBase64/action-plan
+      // photos, all via .dataUrl.split(',')[1]) strips that prefix before
+      // sending, because the flow's Create File step expects PURE base64
+      // and base64ToBinary() throws on the "data:...;base64," prefix's
+      // colons/slashes — this is what was failing the "Subject"/"File"
+      // loop in SmartQC-Save_Finding_Risk for every freshly-attached file.
       const attached  = findingRiskBlocks.map(b => ({
         subject: b.subject.trim(),
-        files:   b.files.map(f => ({ name: f.name, content: f.content || null, url: (f.url && f.url.startsWith('http')) ? f.url : null })),
+        files:   b.files.map(f => ({
+          name:    f.name,
+          content: (f.content && f.content.startsWith('data:')) ? f.content.split(',')[1] : (f.content || null),
+          url:     (f.url && f.url.startsWith('http')) ? f.url : null
+        })),
         deletedFiles: b.deletedFiles || []
       }));
       const videos = findingRiskBlocks.map(b => ({ subject: b.subject.trim(), links: b.videoLinks.filter(l => l.trim()) }));
