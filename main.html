@@ -1197,6 +1197,32 @@
   // TODO: replace with your dedicated Power Automate flow URL for saving Self Evaluation data
   const SAVE_EVALUATION_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/bf0625c761ce423eab7a49021b7928a2/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=pd-fHiPSTX1L7wRhxi_q62AR5yIDvPqSs7C7RJ44NqM";
   const SEND_APPOINTMENT_URL    = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/6f54d1eaac304cc7a07b06bfbacb4afb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=-OjO9tNatXGt_oCEQ-wJHZUBJKMdk0Vyp6jawH-1zvw";
+  // ── CLAIM MONITOR "Edit Details" URL ────────────────────────────────────
+  // Fired by saveClaimEdit() when the Claim Monitor pane's "✏️ Edit Details"
+  // form is saved. Payload: { id, subject, source, market, typeAir,
+  // modelName, serialNumbers, part, partNo, productionDate, installDate,
+  // occurredDate, periodOfUsing, problemLocation, detail, isEditMode,
+  // tabSave: 'claimEdit', imagesBase64[], documentsBase64[] } — these are
+  // CLAIM-INTAKE fields (same ones CLAIM_SUBMIT_URL writes at claim
+  // creation), NOT investigation fields, so this needs its OWN dedicated
+  // "SmartQC - EditClaim" flow (a Switch/Condition case bolted onto
+  // SAVE_INVESTIGATION_URL would work too, but that flow was built for the
+  // investigation tabs and has no branch/schema for these field names —
+  // that mismatch is exactly why edits silently never reached SharePoint).
+  // Column mapping the new flow's "Update item" action needs:
+  //   subject->Subject, source->Source, market->Market, typeAir->TypeAir,
+  //   modelName->ModelName, serialNumbers->SerialNumbers, part->Part,
+  //   partNo->PartNo, productionDate->ProductionDate,
+  //   installDate->InstallDate, occurredDate->OccurredDate,
+  //   periodOfUsing->PeriodOfUsing, problemLocation->ProblemLocation,
+  //   detail->Detail — then Apply-to-each over imagesBase64/documentsBase64
+  //   (same Create-file pattern as CLAIM_SUBMIT_URL) and chain the
+  //   "regenerate claims.js" step at the end like every other save flow.
+  // PASTE YOUR PAD/Power Automate HTTP TRIGGER URL BELOW — until you do,
+  // saveClaimEdit() falls back to SAVE_INVESTIGATION_URL (which has no
+  // handling for this, so edits will keep silently not saving until either
+  // this URL is configured or that flow gets a matching branch added).
+  const SAVE_CLAIM_EDIT_URL = "PASTE_YOUR_SAVE_CLAIM_EDIT_URL_HERE";
 
   // ── CLOSE CLAIM URL ──────────────────────────────────────────────────────
   // Fired when the user clicks "Generate Draft Report (Step 4)". Triggers the
@@ -1403,7 +1429,8 @@
   const _WRITE_FLOW_URLS = [
     CLAIM_SUBMIT_URL, SAVE_INVESTIGATION_URL, SAVE_FINDING_RISK_URL, START_CLAIM_URL,
     CONFIRM_PLAYERS_URL, SAVE_INSPECTION_URL, SAVE_ANALYSIS_URL, SAVE_CONSIDERATIONS_URL,
-    SAVE_EVALUATION_URL, SEND_APPOINTMENT_URL, SAVE_CLOSE_CLAIM_URL, SAVE_VERIFICATION_URL
+    SAVE_EVALUATION_URL, SEND_APPOINTMENT_URL, SAVE_CLOSE_CLAIM_URL, SAVE_VERIFICATION_URL,
+    SAVE_CLAIM_EDIT_URL
   ].filter(u => u && !u.startsWith('PASTE_'));
   (function installWriteTracker() {
     const origFetch = window.fetch.bind(window);
@@ -4261,7 +4288,8 @@
         imagesBase64:    imagesBase64,
         documentsBase64: docsBase64
       };
-      await fetch(SAVE_INVESTIGATION_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+      const url = (SAVE_CLAIM_EDIT_URL && !SAVE_CLAIM_EDIT_URL.startsWith('PASTE_')) ? SAVE_CLAIM_EDIT_URL : SAVE_INVESTIGATION_URL;
+      await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
       // Update local display
       selectedClaimData.subject         = payload.subject;
       selectedClaimData.source          = payload.source;
