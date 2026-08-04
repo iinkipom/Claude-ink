@@ -1175,7 +1175,18 @@
   // PAD Desktop to regenerate claims.js on Drive Z immediately (no 60s wait).
   //
   // Payload per flow:
-  //   SAVE_INSPECTION_URL     → { id, inspectionData, investigationImagesBase64[] }
+  //   SAVE_INSPECTION_URL     → { id, inspectionData, investigationImagesBase64[],
+  //                               deletedInspectionImages: string (JSON array of
+  //                               URLs) } — APPEND-only flow: only NEW photos are
+  //                               ever sent in investigationImagesBase64 (existing
+  //                               ones already in the InspectionImages column are
+  //                               never re-sent), so deletedInspectionImages is
+  //                               how the user's "✕ remove" button on an already-
+  //                               saved photo (removeInvestigationPreview(), see
+  //                               ~line 4034) tells the flow which URLs to DROP
+  //                               from that column instead — filter those out
+  //                               before appending the new ones. Same idiom
+  //                               Finding Risk already uses for deletedFiles.
   //   SAVE_ANALYSIS_URL       → { id, rootCauseAnalysis, outflowAnalysis }
   //   SAVE_CONSIDERATIONS_URL → { id, actionPlan, investigationImagesBase64[] }
   //
@@ -1779,6 +1790,14 @@
   // In-memory base64 image store — key = preview containerId
   // Also mirrored into selectedClaimData._photos so photos survive navigation back
   let investigationImageStore = {};
+
+  // Already-saved (SharePoint/OneDrive URL) Inspection/Action photos the
+  // user removed this session — key = preview containerId, value = array of
+  // the exact URLs to drop. Sent as deletedInspectionImages/
+  // deletedActionImages so submitInspection()/saveInvestigation() can tell
+  // the flow which URLs to remove from that photo column (append-only flow,
+  // same "deletedFiles" idiom Finding Risk already uses for its documents).
+  let investigationDeletedPhotos = {};
 
   // Verify Claim evidence DOCUMENTS (PDF/Excel — replaces the old evidence
   // video link input). Two parallel stores per action containerId
@@ -2827,13 +2846,24 @@
         return Promise.resolve({ ref: obj.ref, name: obj.taggedName || obj.name || 'image.jpg', content: obj.dataUrl.split(',')[1] });
       }));
 
+      // Every inspPrev_N container's removed-this-session URLs, flattened —
+      // append-only flow needs this explicit "drop these" list since it
+      // never overwrites InspectionImages wholesale (see
+      // removeInvestigationPreview()/investigationDeletedPhotos above).
+      const deletedInspectionImages = document.querySelectorAll('.dynamic-block .insp-img').length
+        ? Array.from(document.querySelectorAll('.dynamic-block .insp-img')).flatMap((_, idx) => investigationDeletedPhotos[`inspPrev_${idx + 1}`] || [])
+        : [];
+
       const payload = {
         id:                         selectedClaimId.toString(),
         inspectionData:             iData.join('\n\n') || 'N/A',
         // ── Separate field for Inspection images → /3.Inspection-Picture/ ──
         inspectionImagesBase64:     inspImagesBase64,
         // Keep for backward compatibility with existing flow
-        investigationImagesBase64:  inspImagesBase64
+        investigationImagesBase64:  inspImagesBase64,
+        // URLs the user removed this session — flow should drop these from
+        // InspectionImages instead of only ever appending new ones.
+        deletedInspectionImages:    JSON.stringify(deletedInspectionImages)
       };
 
       // Use SAVE_INSPECTION_URL if configured, otherwise fallback
@@ -2843,6 +2873,9 @@
       } else {
         await fetch(SAVE_INVESTIGATION_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, tabSave: 'inspection' }) });
       }
+      // Clear only the inspPrev_* entries just sent — leave any pending
+      // Action-photo deletions (actPrev_*) alone for their own save path.
+      Object.keys(investigationDeletedPhotos).filter(k => k.startsWith('inspPrev_')).forEach(k => delete investigationDeletedPhotos[k]);
 
       // Update local claim data
       if (selectedClaimData) selectedClaimData.inspectionData = payload.inspectionData;
@@ -3987,6 +4020,54 @@
     });
   }
 
+  /** Removes one photo preview thumbnail (Inspection/Action containers,
+   *  wherever restorePreviewsFromStore/restorePreviewsFromUrls render one) —
+   *  addresses the "previously attached picture has no way to remove it"
+   *  request. If it's an already-saved http(s) URL, records it into
+   *  investigationDeletedPhotos[containerId] so the next Submit/Save tells
+   *  the flow to drop it from that photo column (submitInspection() /
+   *  saveInvestigation() read this back — see deletedInspectionImages /
+   *  deletedActionImages). If it came from this session's
+   *  investigationImageStore, splices it out of there (and its
+   *  selectedClaimData._photos mirror) too so a resubmit doesn't re-attach
+   *  it. Always removes the thumbnail from the DOM immediately. */
+  function removeInvestigationPreview(containerId, src, wrapEl) {
+    if (src && src.startsWith('http')) {
+      if (!investigationDeletedPhotos[containerId]) investigationDeletedPhotos[containerId] = [];
+      investigationDeletedPhotos[containerId].push(src);
+    }
+    const stored = investigationImageStore[containerId];
+    if (stored && stored.length) {
+      const i = stored.findIndex(e => e.dataUrl === src);
+      if (i !== -1) {
+        stored.splice(i, 1);
+        if (selectedClaimData && selectedClaimData._photos && selectedClaimData._photos[containerId]) {
+          const j = selectedClaimData._photos[containerId].findIndex(e => e.dataUrl === src);
+          if (j !== -1) selectedClaimData._photos[containerId].splice(j, 1);
+        }
+      }
+    }
+    if (wrapEl && wrapEl.parentNode) wrapEl.parentNode.removeChild(wrapEl);
+  }
+
+  /** Appends a ✕ delete button to a preview-item wrap, wired to
+   *  removeInvestigationPreview() — shared by both preview renderers below.
+   *  Reuses the existing .preview-item .remove-btn CSS (already defined,
+   *  previously unused) so this matches the app's established remove-button
+   *  look. */
+  function _appendPhotoDeleteButton(wrap, containerId, src) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'remove-btn';
+    btn.innerHTML = '&times;';
+    btn.title = 'Remove photo';
+    btn.addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      removeInvestigationPreview(containerId, src, wrap);
+    });
+    wrap.appendChild(btn);
+  }
+
   function restorePreviewsFromStore(containerId) {
     const stored = investigationImageStore[containerId];
     if (!stored || !stored.length) return;
@@ -4005,6 +4086,7 @@
         openLightbox(e.dataUrl);
       });
       wrap.appendChild(img);
+      _appendPhotoDeleteButton(wrap, containerId, e.dataUrl);
       container.appendChild(wrap);
     });
   }
@@ -4036,7 +4118,9 @@
       });
       img.onerror = function() {
         wrap.innerHTML = '<div style="padding:4px 0;"><a href="' + url + '" target="_blank" style="font-size:11px;">📷 View photo</a></div>';
+        _appendPhotoDeleteButton(wrap, containerId, url); // onerror replaces wrap's innerHTML — re-add the button
       };
+      _appendPhotoDeleteButton(wrap, containerId, url);
       wrap.appendChild(img);
       container.appendChild(wrap);
     });
@@ -6708,6 +6792,15 @@
       const ofText   = oData.join('\n');
       const apText   = aData.join('\n\n');
 
+      // Explicit "drop these" list, same reasoning as submitInspection()'s
+      // deletedInspectionImages — harmless if this flow already treats
+      // investigationImagesBase64 as the full replacement list, but
+      // required if it only ever appends.
+      const deletedInspectionImages = Object.keys(investigationDeletedPhotos)
+        .filter(k => k.startsWith('inspPrev_')).flatMap(k => investigationDeletedPhotos[k]);
+      const deletedActionImages = Object.keys(investigationDeletedPhotos)
+        .filter(k => k.startsWith('actPrev_')).flatMap(k => investigationDeletedPhotos[k]);
+
       const payload = {
         id: selectedClaimId.toString(),
         inspectionData:            inspText,
@@ -6715,10 +6808,17 @@
         outflowAnalysis:           ofText,
         actionPlan:                apText,
         status:                    (selectedClaimData?.status) || 'Investigating',
-        investigationImagesBase64: invImagesBase64
+        investigationImagesBase64: invImagesBase64,
+        deletedInspectionImages:   JSON.stringify(deletedInspectionImages),
+        deletedActionImages:       JSON.stringify(deletedActionImages)
       };
 
       await fetch(SAVE_INVESTIGATION_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+
+      // Sent — clear so a later save doesn't resend already-processed deletions
+      Object.keys(investigationDeletedPhotos)
+        .filter(k => k.startsWith('inspPrev_') || k.startsWith('actPrev_'))
+        .forEach(k => delete investigationDeletedPhotos[k]);
 
       // Persist text fields into selectedClaimData so re-open can restore them
       if (selectedClaimData) {
