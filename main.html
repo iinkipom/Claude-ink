@@ -1804,10 +1804,35 @@
   // (verifyDocs_<Type>_<N>):
   //   verificationDocUrlStore[containerId] -> [{name, url}]     already saved to SharePoint (this claim, reopened)
   //   verificationDocFiles[containerId]    -> [File, File, ...] picked THIS session, not yet uploaded
-  // Both reset per claim open (openVerifyWorkspace) and merged for display
-  // by _renderDocChips()/resolved for submit by _resolveExistingDocsForSave().
+  // Both reset ONLY on a genuine claim switch (see _lastOpenedVerifyClaimId
+  // in openVerifyWorkspace) — never on a same-claim reopen or a
+  // _refreshVerificationEvidenceStores() call, both of which now MERGE into
+  // whatever's already known instead of replacing it (see
+  // _populateVerificationDocUrlStore). Merged for display by
+  // _renderDocChips()/resolved for submit by _resolveExistingDocsForSave().
   let verificationDocUrlStore = {};
   let verificationDocFiles = {};
+
+  // Same idea as verificationDocUrlStore, but for already-saved evidence
+  // PHOTOS (verifyPrev_<Type>_<N>) — see _restoreVerificationPhotosFromUrls().
+  // Needed because, unlike Inspection/Action photos, the Verify workspace's
+  // wraps are torn down and rebuilt from scratch on every openVerifyWorkspace()
+  // call (even a same-claim reopen), so there's no DOM state left to merge
+  // with — this JS-level store is what actually survives across those
+  // rebuilds and keeps the merge additive.
+  let verificationImageUrlStore = {};
+
+  // Tracks which claim ID the Verify workspace was last opened for — lets
+  // openVerifyWorkspace() tell a genuine claim switch (reset the stores
+  // above, so claim A's evidence can't bleed into claim B) apart from a
+  // same-claim reopen (never reset — merge only). See the "previously
+  // attached file disappears after verifying a different action" bug this
+  // fixes: reopening the SAME claim's Verify workspace mid-session used to
+  // repopulate these stores from whatever claim snapshot the caller happened
+  // to be holding, which could be stale (saved moments ago, but claims.js on
+  // disk hasn't been regenerated yet) — wiping out evidence that was, in
+  // fact, already correctly saved.
+  let _lastOpenedVerifyClaimId = null;
 
   /* ── triggerClaimsRefreshOnLoad ────────────────────────────────────────────
      Fires ONCE per page load / F5 reload. Calls the PAD Cloud flow that asks
@@ -3835,14 +3860,18 @@
     _renderDocChips(containerId, true);
   }
 
-  /** Parses the saved VerificationDocuments URL list and buckets each URL
+  /** Parses the saved VerificationDocuments URL list and MERGES each URL
    *  into verificationDocUrlStore by the "VerifyCorrectiveDocN_"/
    *  "VerifyPreventiveDocN_" tag baked into its filename — same routing
    *  convention as _restoreVerificationPhotosFromUrls(), just for
-   *  documents instead of photos. Resets the store first (called fresh
-   *  per claim open). */
+   *  documents instead of photos. Deliberately additive (dedupes by url,
+   *  never clears first) — safe to call repeatedly with a possibly-stale
+   *  claims.js snapshot (same-claim reopen, or _refreshVerificationEvidenceStores()
+   *  before submit) without ever losing a URL a previous, more-complete call
+   *  already knew about. Callers that need a genuine reset for a real claim
+   *  switch do it explicitly — see _lastOpenedVerifyClaimId in
+   *  openVerifyWorkspace(). */
   function _populateVerificationDocUrlStore(rawUrls) {
-    verificationDocUrlStore = {};
     let urls = [];
     if (Array.isArray(rawUrls)) urls = rawUrls.filter(Boolean);
     else if (typeof rawUrls === 'string' && rawUrls.trim()) {
@@ -3859,7 +3888,9 @@
       if (!key) return;
       const displayName = filename.replace(/^Verify(?:Corrective|Preventive)Doc\d+_/i, '');
       if (!verificationDocUrlStore[key]) verificationDocUrlStore[key] = [];
-      verificationDocUrlStore[key].push({ name: displayName, url });
+      if (!verificationDocUrlStore[key].some(e => e.url === url)) {
+        verificationDocUrlStore[key].push({ name: displayName, url });
+      }
     });
   }
 
@@ -7610,7 +7641,19 @@
   /** Same idea as restoreAllPreviewsFromUrls() (used for Inspection/Action
    *  photos) but for the separate VerificationImages field — routes each
    *  URL to its verifyPrev_<Type>_<N> container by the "VerifyCorrectiveN_"
-   *  / "VerifyPreventiveN_" tag baked into its filename. */
+   *  / "VerifyPreventiveN_" tag baked into its filename.
+   *  MERGES into verificationImageUrlStore (dedupe by url) rather than
+   *  rendering straight from rawUrls, then repaints each container from the
+   *  full accumulated set — the Verify workspace's wraps get torn down and
+   *  rebuilt from scratch on every openVerifyWorkspace() call (even a
+   *  same-claim reopen), so there's no DOM state to merge with there; this
+   *  JS-level store is what actually survives that rebuild. Without this, a
+   *  call with a stale/incomplete rawUrls (same-claim reopen using an
+   *  in-memory claim snapshot from before the last save, or
+   *  _refreshVerificationEvidenceStores() racing claims.js regeneration)
+   *  would repaint a container with FEWER photos than it actually has saved
+   *  — exactly the "previously attached file disappears after verifying a
+   *  different action" bug. */
   function _restoreVerificationPhotosFromUrls(rawUrls) {
     let urls = [];
     if (Array.isArray(rawUrls)) urls = rawUrls.filter(Boolean);
@@ -7618,7 +7661,6 @@
       try { urls = JSON.parse(rawUrls).filter(Boolean); }
       catch (_) { urls = rawUrls.split(',').map(s => s.trim()).filter(Boolean); }
     }
-    const groups = {};
     urls.forEach(url => {
       const filename = decodeURIComponent((String(url).split('/').pop() || '').split('?')[0]);
       let key = null;
@@ -7627,11 +7669,11 @@
       const pm = filename.match(/VerifyPreventive(\d+)_/i);
       if (pm) key = `verifyPrev_Preventive_${pm[1]}`;
       if (!key) return;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(url);
+      if (!verificationImageUrlStore[key]) verificationImageUrlStore[key] = [];
+      if (!verificationImageUrlStore[key].includes(url)) verificationImageUrlStore[key].push(url);
     });
-    Object.entries(groups).forEach(([containerId, groupUrls]) => {
-      if (document.getElementById(containerId)) restorePreviewsFromUrls(containerId, groupUrls);
+    Object.keys(verificationImageUrlStore).forEach(containerId => {
+      if (document.getElementById(containerId)) restorePreviewsFromUrls(containerId, verificationImageUrlStore[containerId]);
     });
   }
 
@@ -8127,9 +8169,31 @@
   }
 
   function openVerifyWorkspace(claim) {
-    selectedClaimId = claim.id || claim.ID;
+    const claimId = claim.id || claim.ID;
+    // Genuine claim switch vs. reopening the SAME claim mid-session — only a
+    // real switch should clear verificationDocUrlStore/verificationImageUrlStore/
+    // investigationImageStore, since those are keyed by container id alone
+    // (not claim-scoped) and clearing on every open let a stale in-memory
+    // `claim` snapshot (saved moments ago, but this particular object
+    // reference — or claims.js on disk — hadn't caught up yet) wipe out
+    // evidence that was, in fact, already correctly saved. See
+    // _lastOpenedVerifyClaimId's declaration for the full story.
+    const isNewClaim = String(claimId) !== String(_lastOpenedVerifyClaimId);
+    _lastOpenedVerifyClaimId = claimId;
+
+    selectedClaimId = claimId;
     selectedClaimData = claim;
-    investigationImageStore = claim._photos ? Object.assign({}, claim._photos) : {};
+    if (isNewClaim) {
+      investigationImageStore = claim._photos ? Object.assign({}, claim._photos) : {};
+      verificationDocUrlStore = {};
+      verificationImageUrlStore = {};
+    } else if (claim._photos) {
+      // Merge, don't replace — this claim object's _photos mirror may be
+      // stale/absent even though investigationImageStore itself is still valid.
+      Object.keys(claim._photos).forEach(k => {
+        if (!investigationImageStore[k] || !investigationImageStore[k].length) investigationImageStore[k] = claim._photos[k];
+      });
+    }
     verifyState = {};
     verificationDocFiles = {}; // this session's not-yet-uploaded document picks — reset per claim open
 
@@ -8223,6 +8287,27 @@
     });
 
     document.getElementById('verifyStatusMsg').textContent = '';
+
+    // Immediately try to catch up on anything saved moments ago that this
+    // particular claim snapshot might have missed (claims.js regeneration
+    // lag) — additive (see _populateVerificationDocUrlStore/
+    // _restoreVerificationPhotosFromUrls), so this can only ever surface
+    // MORE evidence, never lose what's already showing. Re-renders doc
+    // chips afterward since _refreshVerificationEvidenceStores() only
+    // updates the JS store, not the DOM, for documents.
+    _refreshVerificationEvidenceStores().then(() => {
+      const isTeamLeader = role === 'Team Leader';
+      correctiveNums.forEach(n => {
+        const key = `Corrective_${n}`;
+        const canAct = isTeamLeader || (role === 'Player' && _myVerificationAssignments(selectedClaimData).includes(key));
+        _renderDocChips(`verifyDocs_Corrective_${n}`, canAct);
+      });
+      preventiveNums.forEach(n => {
+        const key = `Preventive_${n}`;
+        const canAct = isTeamLeader || (role === 'Player' && _myVerificationAssignments(selectedClaimData).includes(key));
+        _renderDocChips(`verifyDocs_Preventive_${n}`, canAct);
+      });
+    });
   }
 
   async function submitVerification() {
