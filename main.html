@@ -424,10 +424,26 @@
               </select>
             </div>
             <div class="form-group">
+              <label>Type of Trouble</label>
+              <select id="editTypeTrouble" class="form-control">
+                <option value="Unit">Unit</option>
+                <option value="Spare Part">Spare Part</option>
+                <option value="Special Part">Special Part</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
               <label>Market</label>
-              <select id="editMarket" class="form-control">
+              <select id="editMarket" class="form-control" onchange="updateEditCountries()">
                 <option value="Asia">Asia</option><option value="Europe">Europe</option>
                 <option value="Southeast Asia">Southeast Asia</option><option value="Australia">Australia</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Claim Country</label>
+              <select id="editCountry" class="form-control">
+                <option value="" disabled selected>Select market first...</option>
               </select>
             </div>
           </div>
@@ -1199,18 +1215,26 @@
   const SEND_APPOINTMENT_URL    = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/6f54d1eaac304cc7a07b06bfbacb4afb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=-OjO9tNatXGt_oCEQ-wJHZUBJKMdk0Vyp6jawH-1zvw";
   // ── CLAIM MONITOR "Edit Details" URL ────────────────────────────────────
   // Fired by saveClaimEdit() when the Claim Monitor pane's "✏️ Edit Details"
-  // form is saved. Payload: { id, subject, source, market, typeAir,
-  // modelName, serialNumbers, part, partNo, productionDate, installDate,
-  // occurredDate, periodOfUsing, problemLocation, detail, isEditMode,
-  // tabSave: 'claimEdit', imagesBase64[], documentsBase64[] } — these are
-  // CLAIM-INTAKE fields (same ones CLAIM_SUBMIT_URL writes at claim
-  // creation), NOT investigation fields, so this needs its OWN dedicated
-  // "SmartQC - EditClaim" flow (a Switch/Condition case bolted onto
-  // SAVE_INVESTIGATION_URL would work too, but that flow was built for the
-  // investigation tabs and has no branch/schema for these field names —
-  // that mismatch is exactly why edits silently never reached SharePoint).
-  // Column mapping the new flow's "Update item" action needs:
-  //   subject->Subject, source->Source, market->Market, typeAir->TypeAir,
+  // form is saved. Payload: { id, subject, source, typeTrouble, market,
+  // country, typeAir, modelName, serialNumbers, part, partNo,
+  // productionDate, installDate, occurredDate, periodOfUsing,
+  // problemLocation, detail, isEditMode, tabSave: 'claimEdit',
+  // imagesBase64[], documentsBase64[] } — these are CLAIM-INTAKE fields
+  // (same ones CLAIM_SUBMIT_URL writes at claim creation), NOT investigation
+  // fields, so this needs its OWN dedicated "SmartQC - EditClaim" flow
+  // (a Switch/Condition case bolted onto SAVE_INVESTIGATION_URL would work
+  // too, but that flow was built for the investigation tabs and has no
+  // branch/schema for these field names — that mismatch is exactly why
+  // edits silently never reached SharePoint).
+  // Column mapping the new flow's "Update item" action needs — EVERY one of
+  // these should come from the TRIGGER, never from a "Get item(s)" step
+  // (mapping from Get items writes the field back onto its own unchanged
+  // value, which is a real bug that's bitten this flow before — see
+  // typeTrouble/country below, which used to be the two fields left
+  // pointing at Get items because the edit form didn't have inputs for them
+  // yet; now that it does, ALL fields below must come from the trigger):
+  //   subject->Subject, source->Source, typeTrouble->Type Trouble,
+  //   market->Market, country->Claim Country, typeAir->TypeAir,
   //   modelName->ModelName, serialNumbers->SerialNumbers, part->Part,
   //   partNo->PartNo, productionDate->ProductionDate,
   //   installDate->InstallDate, occurredDate->OccurredDate,
@@ -1218,6 +1242,11 @@
   //   detail->Detail — then Apply-to-each over imagesBase64/documentsBase64
   //   (same Create-file pattern as CLAIM_SUBMIT_URL) and chain the
   //   "regenerate claims.js" step at the end like every other save flow.
+  // NOTE: claims.js's own Select action doesn't expose typeTrouble/country
+  // back to the app yet (they were never read-back fields before this),
+  // so the Edit Details form can SAVE them correctly but can't PRE-FILL
+  // them with the claim's current value until that Select mapping is added
+  // too — same as any other field claims.js doesn't yet carry.
   // PASTE YOUR PAD/Power Automate HTTP TRIGGER URL BELOW — until you do,
   // saveClaimEdit() falls back to SAVE_INVESTIGATION_URL (which has no
   // handling for this, so edits will keep silently not saving until either
@@ -2656,6 +2685,25 @@
     countrySelect.innerHTML = '<option value="" disabled selected>Select Country...</option>';
     countrySelect.disabled = false;
     (countryDatabase[market] || []).forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; countrySelect.appendChild(o); });
+  }
+
+  /** Same idea as updateCountries(), for the Claim Monitor "Edit Details"
+   *  form's editMarket/editCountry pair — kept separate since the two forms
+   *  have different element ids and the edit one needs to preselect the
+   *  claim's CURRENT country (see toggleClaimEditMode()), not just default
+   *  to "Select Country...". Pass a country to preselect it once the list
+   *  is rebuilt; omit it for a plain onchange rebuild (defaults to the
+   *  placeholder, matching updateCountries()' behavior). */
+  function updateEditCountries(preselect) {
+    const market = document.getElementById('editMarket').value;
+    const countrySelect = document.getElementById('editCountry');
+    countrySelect.innerHTML = '<option value="" disabled' + (preselect ? '' : ' selected') + '>Select Country...</option>';
+    (countryDatabase[market] || []).forEach(c => {
+      const o = document.createElement('option');
+      o.value = c; o.textContent = c;
+      if (preselect && c === preselect) o.selected = true;
+      countrySelect.appendChild(o);
+    });
   }
 
   function generateSerialInputs(qty) {
@@ -4234,7 +4282,13 @@
       // Populate edit fields using resolveField — handles claims.js field names exactly
       document.getElementById('editSubject').value    = resolveField(selectedClaimData, ['Subject','subject'], '');
       document.getElementById('editSource').value     = resolveField(selectedClaimData, ['source','Source'], 'MTH');
+      // typeTrouble/country aren't in claims.js's Select output yet (see
+      // SAVE_CLAIM_EDIT_URL's flow-spec comment) — resolveField just falls
+      // through to the default until that gets added, same as any other
+      // not-yet-exposed field.
+      document.getElementById('editTypeTrouble').value = resolveField(selectedClaimData, ['typeTrouble','TypeTrouble'], 'Unit');
       document.getElementById('editMarket').value     = resolveField(selectedClaimData, ['market','Market'], 'Asia');
+      updateEditCountries(resolveField(selectedClaimData, ['country','Country'], ''));
       document.getElementById('editTypeAir').value    = resolveField(selectedClaimData, ['typeAir','TypeAir'], 'RAC');
       document.getElementById('editModel').value      = resolveField(selectedClaimData, ['modelName','ModelName'], '');
       document.getElementById('editSerial').value     = resolveField(selectedClaimData, ['serialNumbers','SerialNumbers'], '');
@@ -4265,7 +4319,9 @@
         id:              selectedClaimId.toString(),
         subject:         document.getElementById('editSubject').value,
         source:          document.getElementById('editSource').value,
+        typeTrouble:     document.getElementById('editTypeTrouble').value,
         market:          document.getElementById('editMarket').value,
+        country:         document.getElementById('editCountry').value,
         typeAir:         document.getElementById('editTypeAir').value,
         modelName:       document.getElementById('editModel').value,
         serialNumbers:   document.getElementById('editSerial').value,
@@ -4293,7 +4349,9 @@
       // Update local display
       selectedClaimData.subject         = payload.subject;
       selectedClaimData.source          = payload.source;
+      selectedClaimData.typeTrouble     = payload.typeTrouble;
       selectedClaimData.market          = payload.market;
+      selectedClaimData.country         = payload.country;
       selectedClaimData.typeAir         = payload.typeAir;
       selectedClaimData.TypeAir         = payload.typeAir;
       selectedClaimData.modelName       = payload.modelName;
