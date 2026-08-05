@@ -7329,7 +7329,10 @@
 
   function claimsSortValue(r, key){
     switch(key){
-      case 'claimNo':      return r.runNo;
+      // Same fix as verifyQueueSortValue()'s 'claimNo' case — r.runNo can
+      // be a STRING from claims.js, which sorts lexically ("9" above "12")
+      // instead of numerically unless coerced here.
+      case 'claimNo':      { const n = Number(r.runNo); return isNaN(n) ? r.runNo : n; }
       case 'issueDate':    return r.issueDateRaw ? new Date(r.issueDateRaw).getTime() : null;
       case 'startDate':    return r.startDateRaw ? new Date(r.startDateRaw).getTime() : null;
       case 'closeDate':    return r.closeDateRaw ? new Date(r.closeDateRaw).getTime() : null;
@@ -7841,7 +7844,15 @@
 
   function verifyQueueSortValue(r, key) {
     switch (key) {
-      case 'claimNo':   return r.runNo;
+      // r.runNo can come through as a STRING from claims.js (e.g. "1", "9",
+      // "12") — left as-is, the sort comparator's `typeof === 'number'`
+      // check fails and falls back to lexical string comparison, where "9"
+      // sorts above "12" and "1" sorts below "10"/"11"/"12" entirely (a
+      // shorter string that's a prefix of a longer one compares as
+      // smaller) — exactly the "newest claim not on top" bug reported
+      // (009..002 correctly descending, then 012..010, then 001 stranded
+      // last). Coerce to a real Number so numeric comparison actually runs.
+      case 'claimNo':   { const n = Number(r.runNo); return isNaN(n) ? r.runNo : n; }
       case 'closeDate': return r.closeDateRaw ? new Date(r.closeDateRaw).getTime() : null;
       case 'corrective':return r.correctiveCount;
       case 'preventive':return r.preventiveCount;
