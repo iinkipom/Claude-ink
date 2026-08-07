@@ -8282,6 +8282,15 @@
         ? '<span class="status-badge verify-ready-badge status-active">READY TO VERIFY</span>'
         : '<span class="status-badge verify-ready-badge" style="background:#fff8e0; color:#886600; border:1px solid #e8d080;">NOT YET DUE</span>';
     const readyBadge = state.result ? '<span class="status-badge status-verified">VERIFIED</span>' : dateBadge;
+    // Verified date — shown once this action has an OK/NG result, using the
+    // SAME timestamp submitVerification() stamps into verificationTimestamps
+    // (only actually updated when the result is set/changed THIS visit —
+    // an untouched already-verified action keeps its ORIGINAL date, per
+    // submitVerification()'s touchedNow logic).
+    const verifiedTsRaw = _getVerificationTimestamps(selectedClaimData)[key];
+    const verifiedDateHtml = (state.result && verifiedTsRaw)
+      ? `<div style="font-size:11px; color:#1a7a3d; font-weight:700; margin-bottom:10px;">✔ Verified: ${_formatLogTimestamp(new Date(verifiedTsRaw))}</div>`
+      : '';
     const containerId = `verifyPrev_${type}_${num}`;
     const docContainerId = `verifyDocs_${type}_${num}`;
     const isTeamLeader = role === 'Team Leader';
@@ -8351,6 +8360,7 @@
         <span><strong>Effective:</strong> ${eff ? formatDateDisplay(eff) : '—'}</span>
         <span><strong>Due:</strong> ${due ? formatDateDisplay(due) : '—'}</span>
       </div>
+      ${verifiedDateHtml}
       ${assignRowHtml}
       ${actionControlsHtml}
     `;
@@ -8709,6 +8719,12 @@
 
       statusMsg.textContent = allOk ? '✔ All actions verified — claim marked Verified.' : '✔ Verification saved.';
       alert(allOk ? '✅ All actions verified! Claim marked as Verified.' : '✅ Verification saved.');
+      // Re-render so each action block's "✔ Verified: <date>" reflects this
+      // submit immediately, instead of only appearing on next reopen —
+      // selectedClaimData.verificationTimestamps was just updated above,
+      // and reopening the SAME claim is a safe no-op merge (see
+      // _lastOpenedVerifyClaimId), not a destructive reset.
+      if (selectedClaimData) openVerifyWorkspace(selectedClaimData);
     } catch (e) {
       console.log('submitVerification (CORS suppressed):', e);
       statusMsg.textContent = '✔ Submitted (check flow)';
