@@ -1091,6 +1091,21 @@ textarea.form-control {
 }
 
 /* â”€â”€ Rounded pill header row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* position:sticky lives on <thead> itself (not the individual <th>s) so the
+   ENTIRE header row -- <tr>, its one continuous gradient, and every <th> --
+   moves and stays pinned together as a single unit while scrolling. Putting
+   sticky on each <th> instead (an earlier attempt) made every cell paint
+   its OWN copy of the gradient rather than one strip spanning the row,
+   which visibly changed the header's look even with identical color
+   values -- this keeps the original single-gradient rendering intact while
+   still fixing the real bug (a transparent/misaligned sticky <th> letting
+   scrolling body rows show through underneath it). */
+.data-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
 .data-table thead tr {
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 60%, #DA0037 140%);
 }
@@ -1111,18 +1126,7 @@ textarea.form-control {
   letter-spacing: 1px;
   white-space: nowrap;
   text-align: left;
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  /* Must be opaque, not transparent: position:sticky is applied to each
-     <th>, not the parent <tr> the gradient below is painted on -- once a
-     <th> detaches from normal flow to stick at top:0, the <tr>'s
-     background no longer lines up behind it, so a transparent <th> lets
-     scrolling body rows show straight through the "stuck" header (the
-     reported bug: header overlapped/garbled by row detail while
-     scrolling). Same gradient as .data-table thead tr, painted per-cell
-     so it stays opaque wherever the header actually renders. */
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 60%, #DA0037 140%);
+  position: relative; /* anchors ::after's bottom border line below -- th no longer needs `sticky` itself, but still needs a positioned box for the absolute-positioned pseudo-element */
   border-bottom: none;
   user-select: none;
 }
