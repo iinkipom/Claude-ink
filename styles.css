@@ -1114,7 +1114,15 @@ textarea.form-control {
   position: sticky;
   top: 0;
   z-index: 3;
-  background: transparent;
+  /* Must be opaque, not transparent: position:sticky is applied to each
+     <th>, not the parent <tr> the gradient below is painted on -- once a
+     <th> detaches from normal flow to stick at top:0, the <tr>'s
+     background no longer lines up behind it, so a transparent <th> lets
+     scrolling body rows show straight through the "stuck" header (the
+     reported bug: header overlapped/garbled by row detail while
+     scrolling). Same gradient as .data-table thead tr, painted per-cell
+     so it stays opaque wherever the header actually renders. */
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 60%, #DA0037 140%);
   border-bottom: none;
   user-select: none;
 }
