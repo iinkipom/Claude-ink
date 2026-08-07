@@ -7958,13 +7958,19 @@
     const verifyState = _extractVerificationByBlock(verifDataRaw);
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    let totalActions = 0, verifiedActions = 0, readyActions = 0;
+    let totalActions = 0, verifiedActions = 0, readyActions = 0, okActions = 0, ngActions = 0;
     [['Corrective', correctiveByBlock], ['Preventive', preventiveByBlock]].forEach(([type, byBlock]) => {
       Object.keys(byBlock).forEach(n => {
         totalActions++;
         const key = `${type}_${n}`;
-        const isVerified = !!(verifyState[key] && verifyState[key].result);
-        if (isVerified) { verifiedActions++; return; }
+        const result = verifyState[key] && verifyState[key].result;
+        const isVerified = !!result;
+        if (isVerified) {
+          verifiedActions++;
+          if (result === 'OK') okActions++;
+          else if (result === 'NG') ngActions++;
+          return;
+        }
         const entry = byBlock[n] || {};
         const eff = entry.eff && entry.eff !== 'TBD' ? entry.eff : '';
         const due = entry.due && entry.due !== 'TBD' ? entry.due : '';
@@ -7984,7 +7990,7 @@
       shop: shopVal,
       closeDateRaw, closeDateDisplay: closeDateRaw ? formatDateDisplay(closeDateRaw) : '—',
       correctiveCount, preventiveCount,
-      totalActions, verifiedActions, readyActions, isComplete,
+      totalActions, verifiedActions, readyActions, okActions, ngActions, isComplete,
       statusLabel: isComplete ? 'VERIFIED' : 'QC INVESTIGATED',
     };
   }
@@ -8071,17 +8077,26 @@
         : '<span style="color:var(--charcoal-soft);font-size:10px;">—</span>';
 
       const pct = r.totalActions > 0 ? Math.round((r.verifiedActions / r.totalActions) * 100) : 0;
+      // OK/NG breakdown + total, shown alongside the existing progress bar
+      // — a claim can be "Complete" (every action decided) while still
+      // having NG results, which the old fraction/badge alone didn't surface.
+      const okNgHtml = `
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:3px;">
+          <span style="font-size:10.5px; font-weight:700; color:#1a7a3d;">✅ ${r.okActions} OK</span>
+          <span style="font-size:10.5px; font-weight:700; color:var(--red);">❌ ${r.ngActions} NG</span>
+          <span style="font-size:10.5px; color:var(--charcoal-soft);">/ ${r.totalActions} Total</span>
+        </div>`;
       const progressHtml = r.totalActions === 0
         ? '<span style="color:var(--charcoal-soft);font-size:10px;">No actions</span>'
-        : r.isComplete
+        : okNgHtml + (r.isComplete
           ? '<span class="status-badge status-verified">✅ Complete</span>'
           : `
             <div style="display:flex; align-items:center; gap:6px;">
               <div style="width:56px; height:6px; border-radius:3px; background:var(--surface-2); overflow:hidden; flex-shrink:0;">
                 <div style="width:${pct}%; height:100%; background:var(--red);"></div>
               </div>
-              <span style="font-size:10.5px; font-weight:700; white-space:nowrap;">${r.verifiedActions}/${r.totalActions}</span>
-            </div>`;
+              <span style="font-size:10.5px; font-weight:700; white-space:nowrap;">${r.verifiedActions}/${r.totalActions} verified</span>
+            </div>`);
 
       const statusBadgeHtml = r.isComplete
         ? '<span class="status-badge status-verified">VERIFIED</span>'
