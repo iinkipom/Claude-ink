@@ -1210,7 +1210,34 @@
   const SAVE_INSPECTION_URL     = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/5a80abe4594b425e9d9578c11352bab7/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=qD8mbMVJFMIqt-rCOJGOVNHI7rbDOJTC9XHp98aP7X8";
   const SAVE_ANALYSIS_URL       = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/b1f85cd15c4d4f2faf862236cf79694d/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=FO-e51LTxMa7_xknVz4fPkEWK00hkOKVMC1DYfHUM6k";
   const SAVE_CONSIDERATIONS_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/9bede5535ab848b2aa88fa4fa8d41189/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=wSkY2LUI1xdgpnh5WXsdXHiSlCav04j-G4NX6gv8b5w";
-  // TODO: replace with your dedicated Power Automate flow URL for saving Self Evaluation data
+  // ── SELF EVALUATION URL ──────────────────────────────────────────────────
+  // Fired by submitEvaluation() (Tab 6: Evaluate). The payload actually
+  // needs TWO separate writes in this flow — missing either one is why a
+  // submitted evaluation can vanish after logging out and back in:
+  //   1. Create item in Microsoft List "SmartQC_Personal" — ONE ROW PER
+  //      SUBMISSION (a history/scoreboard log), using the flat fields:
+  //      id, claimSubject, claimCaseNo, evaluateDate (ISO 8601 — the flow's
+  //      Create_item action rejects the app's own "DD/MM/YY HH:mm:ss"
+  //      display format), empId, and the 5 subject-score columns
+  //      (FollowingClaimStatus, AnalysisRootCauseofTrouble,
+  //      CorrespondenceClaimCase, DiscussionForFollowingClaimCase,
+  //      InformationToConcernShop — evalNotifySpeed/InformationToConcernShop
+  //      is simply null for Player submissions, TL-only).
+  //   2. Update item in SmartQC_ClaimCases (matched by `id`, same list every
+  //      other tab's flow writes to) — write the payload's `selfEvaluation`
+  //      field (a JSON array of EVERY player's {empId, name, role, inputs,
+  //      scores, totalScore, suggestion, timestamp} — already merged
+  //      client-side so one player's submission never overwrites another's)
+  //      into a SelfEvaluation column. THIS is what buildEvaluateForm()
+  //      reads back (via claims.js) to show a player their own previously
+  //      submitted result when they reopen the claim — if step 2 is
+  //      missing, or if claims.js's own "Select" action doesn't map
+  //      SelfEvaluation through to the app's output, the submission still
+  //      "worked" (step 1 succeeded, SmartQC_Personal has the row) but the
+  //      claim itself never remembers it, and the Evaluate tab looks blank
+  //      again on next visit even though nothing was actually lost.
+  //   3. Chain the "regenerate claims.js" step at the end, like every other
+  //      save flow, so step 2's write is actually visible next reload.
   const SAVE_EVALUATION_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/bf0625c761ce423eab7a49021b7928a2/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=pd-fHiPSTX1L7wRhxi_q62AR5yIDvPqSs7C7RJ44NqM";
   const SEND_APPOINTMENT_URL    = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/6f54d1eaac304cc7a07b06bfbacb4afb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=-OjO9tNatXGt_oCEQ-wJHZUBJKMdk0Vyp6jawH-1zvw";
   // ── CLAIM MONITOR "Edit Details" URL ────────────────────────────────────
@@ -5010,18 +5037,46 @@
 
     // Restore previously saved self-evaluation for this user/claim, if any
     const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-    let savedInputs = {}, savedSuggestion = '';
+    let savedInputs = {}, savedSuggestion = '', mine = null;
     try {
       const raw = resolveField(claim || {}, ['selfEvaluation','SelfEvaluation'], '');
       if (raw) {
         const all = JSON.parse(raw);
-        const mine = (Array.isArray(all) ? all : []).find(e => String(e.empId || '') === String(profile.empId || ''));
+        mine = (Array.isArray(all) ? all : []).find(e => String(e.empId || '') === String(profile.empId || ''));
         if (mine) {
           if (mine.inputs)     savedInputs     = mine.inputs;
           if (mine.suggestion) savedSuggestion = mine.suggestion;
         }
       }
     } catch(_) {}
+
+    // "You already submitted" banner — surfaces the player's own LAST saved
+    // result immediately at the top, rather than making them infer it from
+    // the per-subject badges below (which a Player could easily mistake for
+    // "not yet evaluated" at a glance). Addresses the request: "if evaluate
+    // already, able to see result of evaluate of each self". Purely a
+    // summary — every input below still restores from savedInputs/mine and
+    // can be edited + resubmitted exactly as before. Only shows once
+    // `mine` is actually found, i.e. claim.selfEvaluation carries this
+    // player's entry — see SAVE_EVALUATION_URL's flow-spec comment if this
+    // never appears even after submitting: that's a flow-side gap (the
+    // claim's own SelfEvaluation column never got written/exposed back),
+    // not a client bug.
+    if (mine) {
+      const banner = document.createElement('div');
+      banner.className = 'action-block';
+      banner.style.cssText = 'margin-bottom:16px; background:#eafaf0; border:1px solid #b7e4c7;';
+      const totalDisplay = (typeof mine.totalScore === 'number') ? `${mine.totalScore} pts` : 'N/A';
+      banner.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+          <div>
+            <div style="font-weight:800; font-size:15px; color:#1a7a3d;">✔ คุณได้ประเมินตนเองสำหรับเคสนี้ไปแล้ว</div>
+            <div style="font-size:12px; color:var(--charcoal-soft); margin-top:2px;">ส่งล่าสุดเมื่อ ${escapeHtml(mine.timestamp || 'N/A')} · คะแนนรวม <strong>${totalDisplay}</strong></div>
+          </div>
+          <span style="font-size:11px; color:var(--charcoal-soft); text-align:right;">แก้ไขคำตอบด้านล่างแล้วกด "Submit Self Evaluation" อีกครั้งเพื่ออัปเดต</span>
+        </div>`;
+      wrap.appendChild(banner);
+    }
 
     const range    = getEvaluateScoreRange(claim);
     const fixedLow = isLowTierFixedScore(claim);
