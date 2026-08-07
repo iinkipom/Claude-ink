@@ -2348,6 +2348,26 @@
     return db.filter(e => _evaluateRecordMatchesUser(e, myEmpId, myFirstName));
   }
 
+  /** The logged-in user's own Evaluates.js (SmartQC_Personal) row for ONE
+   *  specific claim — this is the actual source of truth for "have I
+   *  already evaluated this claim", used by buildEvaluateForm() to lock the
+   *  Evaluate tab into a read-only results view once a submission exists.
+   *  (Earlier this read claim.selfEvaluation/SelfEvaluation off claims.js
+   *  instead — that field is never actually written back onto the claim's
+   *  own SharePoint item by SAVE_EVALUATION_URL, only into SmartQC_Personal,
+   *  so it always came back empty; EVALUATES_DATABASE is what's actually
+   *  populated, confirmed against a live SmartQC_Personal export.)
+   *  submitEvaluation()'s flow uses "Create item", so multiple historical
+   *  rows can exist for the same claim+user if it was ever submitted more
+   *  than once in the past — picks the most recent by EvaluateDate. */
+  function _myEvaluationRecordForClaim(claimId) {
+    if (!claimId) return null;
+    const mine = _myEvaluationRecords().filter(e => String(e.ClaimId ?? e.claimId ?? e.ClaimID ?? '') === String(claimId));
+    if (!mine.length) return null;
+    mine.sort((a, b) => new Date(b.EvaluateDate ?? b.evaluateDate ?? 0).getTime() - new Date(a.EvaluateDate ?? a.evaluateDate ?? 0).getTime());
+    return mine[0];
+  }
+
   /** Same idea as _myEvaluationRecords() but for an ARBITRARY roster user
    *  (not necessarily the logged-in one or profileViewTarget) — used by the
    *  Scoreboard to compute every teammate's own card stats simultaneously,
@@ -4751,7 +4771,14 @@
     }
 
     // Team Leader (unchanged from before Verify Claim existed)
-    const meetingDate = claim && (claim.meetingDate || claim.MeetingDate);
+    // Uses resolveField (not a plain claim.meetingDate||claim.MeetingDate
+    // check) because this SharePoint setup has been seen exposing
+    // multi-word columns in claims.js under an all-lowercase-after-first-
+    // letter internal name (e.g. findingRiskSubject -> "Findingrisksubject"
+    // — see _hasFindingRiskData()) rather than either camelCase form; a
+    // recorded appointment with no matching key here reads as "missing"
+    // even though makeAppointment() saved it correctly.
+    const meetingDate = resolveField(claim, ['meetingDate', 'MeetingDate', 'Meetingdate'], '');
     if (!meetingDate) return { score: null, reason: 'No appointment recorded yet — click "Make Appointment" first.' };
     const start = _firstFindingRiskTimestampOverall(claim);
     const end   = claim && (claim.closeDate || claim.CloseDate);
@@ -5029,58 +5056,96 @@
     });
   }
 
+  /** Renders the Evaluate tab as a read-only results summary once a
+   *  submission already exists for this claim+user — evaluations can't be
+   *  edited or resubmitted once complete, per confirmed business rule.
+   *  Reads EVALUATES_DATABASE via record (see _myEvaluationRecordForClaim),
+   *  preferring the row's SelfEvaluationJSON (per-subject scores + the
+   *  free-text suggestion, same shape submitEvaluation() builds as
+   *  `myEntry`) and falling back to the flat SmartQC_Personal columns if
+   *  that JSON isn't present/parseable — the row's mere existence already
+   *  proves a submission happened, so there's always SOMETHING to show. */
+  function _renderEvaluateLockedView(wrap, record, subjects) {
+    let mine = null;
+    try {
+      const raw = record.SelfEvaluationJSON ?? record.selfEvaluationJSON ?? record.SelfEvaluationJson ?? '';
+      const arr = raw ? JSON.parse(raw) : [];
+      const list = Array.isArray(arr) ? arr : [];
+      const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
+      mine = list.find(e => String(e.empId || '') === String(profile.empId || '')) || list[0] || null;
+    } catch (_) {}
+
+    const scores = (mine && mine.scores) ? mine.scores : {
+      evalTimeStatus:        record.FollowingClaimStatus ?? record.followingClaimStatus,
+      evalRiskAnalysis:      record.AnalysisRootCauseofTrouble ?? record.analysisRootCauseofTrouble,
+      evalResponseSpeed:     record.CorrespondenceClaimCase ?? record.correspondenceClaimCase,
+      evalMeetingAttendance: record.DiscussionForFollowingClaimCase ?? record.discussionForFollowingClaimCase,
+      evalNotifySpeed:       record.InformationToConcernShop ?? record.informationToConcernShop
+    };
+    const suggestion    = (mine && mine.suggestion) || record.Suggestion || record.suggestion || '';
+    const timestamp      = (mine && mine.timestamp) || record.EvaluateDate || record.evaluateDate || '';
+    const totalScoreRaw = (mine && mine.totalScore !== undefined) ? mine.totalScore : (record.TotalScore ?? record.totalScore);
+    const totalScore     = Number(totalScoreRaw);
+
+    const banner = document.createElement('div');
+    banner.className = 'action-block';
+    banner.style.cssText = 'margin-bottom:16px; background:#eafaf0; border:1px solid #b7e4c7;';
+    banner.innerHTML = `
+      <div style="font-weight:800; font-size:15px; color:#1a7a3d;">🔒 คุณได้ประเมินตนเองสำหรับเคสนี้ไปแล้ว — ไม่สามารถแก้ไขหรือส่งซ้ำได้</div>
+      <div style="font-size:12px; color:var(--charcoal-soft); margin-top:2px;">ส่งเมื่อ ${escapeHtml(String(timestamp || 'N/A'))} · คะแนนรวม <strong>${!isNaN(totalScore) ? totalScore + ' pts' : 'N/A'}</strong></div>`;
+    wrap.appendChild(banner);
+
+    subjects.forEach((subj, idx) => {
+      const score = scores ? scores[subj.key] : undefined;
+      const hasScore = score !== null && score !== undefined && score !== '' && !isNaN(Number(score));
+      const scoreHtml = hasScore
+        ? `<span style="font-size:12px; font-weight:800; color:#fff; background:var(--red); padding:4px 12px; border-radius:20px; white-space:nowrap;">${Number(score)} pts</span>`
+        : `<span style="font-size:11px; color:var(--charcoal-soft); background:var(--surface-2); padding:4px 10px; border-radius:20px; white-space:nowrap;">N/A</span>`;
+      const block = document.createElement('div');
+      block.className = 'action-block';
+      block.style.marginBottom = '16px';
+      block.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:4px;">
+          <div style="font-weight:700; font-size:16px; color:var(--charcoal);">${idx + 1}. ${subj.title}</div>
+          <div style="flex-shrink:0;">${scoreHtml}</div>
+        </div>
+        <div style="font-size:13px; color:var(--charcoal-soft); line-height:1.6;">${subj.detail}</div>`;
+      wrap.appendChild(block);
+    });
+
+    const suggestionBlock = document.createElement('div');
+    suggestionBlock.className = 'action-block';
+    suggestionBlock.innerHTML = `
+      <div style="font-weight:700; font-size:16px; color:var(--charcoal); margin-bottom:4px;">${subjects.length + 1}. สิ่งที่ต้องปรับปรุงและรู้สึกว่ายังทำได้ไม่ดีพอและยังคิดว่าเป็นปัญหาอยู่</div>
+      <div style="font-size:13px; color:var(--charcoal-soft); white-space:pre-wrap;">${escapeHtml(suggestion || '-')}</div>`;
+    wrap.appendChild(suggestionBlock);
+  }
+
   function buildEvaluateForm(claim, role) {
     const wrap = document.getElementById('evaluateFormWrap');
+    const submitBtn = document.getElementById('submitEvaluationBtn');
     wrap.innerHTML = '';
     evaluateInputs = {};
     evaluateScores = {};
 
-    // Restore previously saved self-evaluation for this user/claim, if any
-    const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-    let savedInputs = {}, savedSuggestion = '', mine = null;
-    try {
-      const raw = resolveField(claim || {}, ['selfEvaluation','SelfEvaluation'], '');
-      if (raw) {
-        const all = JSON.parse(raw);
-        mine = (Array.isArray(all) ? all : []).find(e => String(e.empId || '') === String(profile.empId || ''));
-        if (mine) {
-          if (mine.inputs)     savedInputs     = mine.inputs;
-          if (mine.suggestion) savedSuggestion = mine.suggestion;
-        }
-      }
-    } catch(_) {}
+    const subjects = EVALUATE_SUBJECTS.filter(s => s.appliesTo.includes(role));
 
-    // "You already submitted" banner — surfaces the player's own LAST saved
-    // result immediately at the top, rather than making them infer it from
-    // the per-subject badges below (which a Player could easily mistake for
-    // "not yet evaluated" at a glance). Addresses the request: "if evaluate
-    // already, able to see result of evaluate of each self". Purely a
-    // summary — every input below still restores from savedInputs/mine and
-    // can be edited + resubmitted exactly as before. Only shows once
-    // `mine` is actually found, i.e. claim.selfEvaluation carries this
-    // player's entry — see SAVE_EVALUATION_URL's flow-spec comment if this
-    // never appears even after submitting: that's a flow-side gap (the
-    // claim's own SelfEvaluation column never got written/exposed back),
-    // not a client bug.
-    if (mine) {
-      const banner = document.createElement('div');
-      banner.className = 'action-block';
-      banner.style.cssText = 'margin-bottom:16px; background:#eafaf0; border:1px solid #b7e4c7;';
-      const totalDisplay = (typeof mine.totalScore === 'number') ? `${mine.totalScore} pts` : 'N/A';
-      banner.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
-          <div>
-            <div style="font-weight:800; font-size:15px; color:#1a7a3d;">✔ คุณได้ประเมินตนเองสำหรับเคสนี้ไปแล้ว</div>
-            <div style="font-size:12px; color:var(--charcoal-soft); margin-top:2px;">ส่งล่าสุดเมื่อ ${escapeHtml(mine.timestamp || 'N/A')} · คะแนนรวม <strong>${totalDisplay}</strong></div>
-          </div>
-          <span style="font-size:11px; color:var(--charcoal-soft); text-align:right;">แก้ไขคำตอบด้านล่างแล้วกด "Submit Self Evaluation" อีกครั้งเพื่ออัปเดต</span>
-        </div>`;
-      wrap.appendChild(banner);
+    // Once a submission already exists for this claim+user, lock the whole
+    // tab into a read-only results view — no editing, no resubmitting, per
+    // confirmed business rule. This is also the real fix for "can't see my
+    // score after logging back in": EVALUATES_DATABASE (Evaluates.js /
+    // SmartQC_Personal) is what's actually populated — claim.selfEvaluation
+    // is not (see SAVE_EVALUATION_URL's flow-spec comment for why).
+    const myRecord = _myEvaluationRecordForClaim(claim && (claim.id || claim.ID));
+    if (myRecord) {
+      _renderEvaluateLockedView(wrap, myRecord, subjects);
+      if (submitBtn) submitBtn.style.display = 'none';
+      return;
     }
+    if (submitBtn) submitBtn.style.display = '';
 
     const range    = getEvaluateScoreRange(claim);
     const fixedLow = isLowTierFixedScore(claim);
-    const subjects = EVALUATE_SUBJECTS.filter(s => s.appliesTo.includes(role));
 
     subjects.forEach((subj, idx) => {
       const block = document.createElement('div');
@@ -5088,7 +5153,11 @@
       block.style.marginBottom = '16px';
       block.id = `evalBlock_${subj.key}`;
 
-      const saved = savedInputs[subj.key] || {};
+      // No draft-restore anymore — a not-yet-submitted evaluation always
+      // starts blank (see buildEvaluateForm(): "already submitted" now
+      // renders the locked read-only view above instead, so there's no
+      // in-between "partially filled, resume later" state to restore).
+      const saved = {};
       let inputHtml = '';
       let result = { score: null };
 
@@ -5149,7 +5218,7 @@
     suggestionBlock.innerHTML = `
       <div style="font-weight:700; font-size:16px; color:var(--charcoal); margin-bottom:4px;">${subjects.length + 1}. สิ่งที่ต้องปรับปรุงและรู้สึกว่ายังทำได้ไม่ดีพอและยังคิดว่าเป็นปัญหาอยู่</div>
       <div style="font-size:13px; color:var(--charcoal-soft); margin-bottom:10px; line-height:1.6;">ระบุสิ่งที่คุณคิดว่ายังเป็นปัญหา หรือสิ่งที่อยากปรับปรุงเกี่ยวกับการดำเนินงานเคลมเคสนี้</div>
-      <textarea id="evalSuggestionInput" class="form-control" style="min-height:100px; font-size:14px;" placeholder="พิมพ์รายละเอียดที่นี่...">${savedSuggestion}</textarea>
+      <textarea id="evalSuggestionInput" class="form-control" style="min-height:100px; font-size:14px;" placeholder="พิมพ์รายละเอียดที่นี่..."></textarea>
     `;
     wrap.appendChild(suggestionBlock);
   }
@@ -5182,6 +5251,13 @@
     if (!selectedClaimId) { alert('Please open a claim first.'); return; }
     const role = getCurrentUserRoleOnClaim(selectedClaimData);
     if (!role) { alert('You are not eligible to self-evaluate this claim.'); return; }
+    // Defense-in-depth: the button is hidden once buildEvaluateForm() finds
+    // an existing record, but guard the actual submit path too rather than
+    // trusting UI state alone (e.g. a re-enabled button, a stale render).
+    if (_myEvaluationRecordForClaim(selectedClaimId)) {
+      alert('You have already submitted your self-evaluation for this claim. It cannot be edited or resubmitted.');
+      return;
+    }
 
     const subjects = EVALUATE_SUBJECTS.filter(s => s.appliesTo.includes(role));
     // Auto subjects are recomputed fresh right before submit, so the payload
@@ -5275,9 +5351,25 @@
 
       await fetch(SAVE_EVALUATION_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
 
+      // Optimistically add this submission to the in-memory EVALUATES_DATABASE
+      // (Evaluates.js isn't reloaded mid-session) so _myEvaluationRecordForClaim()
+      // finds it immediately — otherwise the tab wouldn't flip to the locked
+      // read-only view until Evaluates.js gets regenerated and the page reloads,
+      // even though the submission genuinely went through.
+      if (!Array.isArray(window.EVALUATES_DATABASE)) window.EVALUATES_DATABASE = [];
+      window.EVALUATES_DATABASE.push({
+        ClaimId: selectedClaimId, empId: profile.empId || '',
+        FirstName: profile.firstName || '', LastName: profile.lastName || '',
+        EvaluateDate: now.toISOString(), TotalScore: totalScore, Suggestion: suggestionVal,
+        FollowingClaimStatus: payload.FollowingClaimStatus, AnalysisRootCauseofTrouble: payload.AnalysisRootCauseofTrouble,
+        CorrespondenceClaimCase: payload.CorrespondenceClaimCase, DiscussionForFollowingClaimCase: payload.DiscussionForFollowingClaimCase,
+        InformationToConcernShop: payload.InformationToConcernShop, SelfEvaluationJSON: payload.selfEvaluation
+      });
+
       if (statusEl) statusEl.innerText = `✔ Saved at ${ts} — Total: ${totalScore} pts`;
       btn.innerText = '✔ Saved';
       setTimeout(() => { btn.disabled = false; btn.innerText = origText; }, 2500);
+      renderEvaluateTab(); // switch straight to the locked read-only view
     } catch(e) {
       console.log('Self evaluation save (CORS suppressed):', e);
       if (statusEl) statusEl.innerText = '✔ Submitted (check flow)';
