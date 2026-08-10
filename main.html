@@ -1239,7 +1239,7 @@
   //   3. Chain the "regenerate claims.js" step at the end, like every other
   //      save flow, so step 2's write is actually visible next reload.
   const SAVE_EVALUATION_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/bf0625c761ce423eab7a49021b7928a2/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=pd-fHiPSTX1L7wRhxi_q62AR5yIDvPqSs7C7RJ44NqM";
-  const SEND_APPOINTMENT_URL    = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/6f54d1eaac304cc7a07b06bfbacb4afb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=-OjO9tNatXGt_oCEQ-wJHZUBJKMdk0Vyp6jawH-1zvw";
+  const SEND_APPOINTMENT_URL    = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/09/workflows/6f54d1eaac304cc7a07b06bfbacb4afb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=-OjO9tNatXGt_oCEQ-wJHZUBJKMdk0Vyp6jawH-1zvw";
   // ── CLAIM MONITOR "Edit Details" URL ────────────────────────────────────
   // Fired by saveClaimEdit() when the Claim Monitor pane's "✏️ Edit Details"
   // form is saved. Payload: { id, subject, source, typeTrouble, market,
@@ -1278,7 +1278,7 @@
   // saveClaimEdit() falls back to SAVE_INVESTIGATION_URL (which has no
   // handling for this, so edits will keep silently not saving until either
   // this URL is configured or that flow gets a matching branch added).
-  const SAVE_CLAIM_EDIT_URL = "PASTE_YOUR_SAVE_CLAIM_EDIT_URL_HERE";
+  const SAVE_CLAIM_EDIT_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/02/workflows/ce835dc97638446b9cf10d8974260e3d/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=iJ0AS3rcu-a-g5E2pGBtF0xfBAr3ANwbwjKEhgIILLA";
 
   // ── CLOSE CLAIM URL ──────────────────────────────────────────────────────
   // Fired when the user clicks "Generate Draft Report (Step 4)". Triggers the
@@ -1452,7 +1452,7 @@
   // the email body from item() fields. PASTE YOUR TRIGGER URL BELOW — a
   // placeholder no-ops the call (see the PASTE_ guard in
   // confirmVerificationAssignments()).
-  const SEND_VERIFY_ASSIGNMENT_EMAIL_URL = "PASTE_YOUR_SEND_VERIFY_ASSIGNMENT_EMAIL_URL_HERE";
+  const SEND_VERIFY_ASSIGNMENT_EMAIL_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/12/workflows/b5cc4a858ed3401997176586bb1819ac/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=DYphpQsPbRinOY1SKZr2RLY2Xdu0h8QCfkgjHRKUU3E";
 
   // ── PAGE-LOAD / F5 REFRESH URL ───────────────────────────────────────────
   // Triggered ONCE whenever the browser tab is loaded or reloaded (F5 / Ctrl+R).
