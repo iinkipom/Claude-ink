@@ -7154,6 +7154,18 @@
     return map;
   }
 
+  /** Rewrites ONE action's Effective Date in place within a raw actionPlan
+   *  text blob — used by confirmChangeEffDateAndReVerify() so a NG'd
+   *  action can get a fresh Effective Date from the Verify Claim page
+   *  without touching the Considerations tab. Leaves that block's own text
+   *  and Due date, and every OTHER block in the string, untouched. */
+  function _rewriteActionEffDate(apText, type, num, newEff) {
+    if (!apText) return apText;
+    const re = new RegExp(`(\\[${type}\\s*${num}\\]\\s*[\\s\\S]*?\\(Eff:\\s*)(.*?)(\\s*\\|\\s*Due:\\s*.*?\\))`, 'i');
+    if (!re.test(apText)) return apText;
+    return apText.replace(re, (whole, pre, oldEff, post) => `${pre}${newEff}${post}`);
+  }
+
   /** Scans saved photo URLs (JSON array, comma-separated string, or plain
    *  array) for filenames matching `tagRegex` (must have one capturing
    *  group = the block number) and returns every block number found. */
@@ -8303,10 +8315,19 @@
       ? `<option value="${i}" ${assignee && String(assignee.empId||'')===String(p.empId||'') && String(assignee.firstName||'')===String(p.firstName||'') ? 'selected' : ''}>${escapeHtml(`${p.firstName||''} ${p.lastName||''}`.trim())}</option>`
       : '').join('');
 
+    // Assigned date — surfaces exactly what computeNotifyShopScore()'s
+    // Player branch actually uses as one half of its clock-start
+    // MAX(effective date, assigned date) comparison, so it's visible
+    // in-context instead of only inferable from the Evaluate tab.
+    const assignedAtRaw = _getVerificationAssigneeTimestamps(selectedClaimData)[key];
+    const assignedDateHtml = (assignee && assignedAtRaw)
+      ? ` <span style="font-size:11px; color:var(--charcoal-soft);">(Assigned: ${_formatLogTimestamp(new Date(assignedAtRaw))})</span>`
+      : '';
+
     const assignRowHtml = `
       <div style="margin-bottom:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <span style="font-size:11px; color:var(--charcoal-soft);">Verify Person:</span>
-        <span id="verifyAssigneeLabel_${key}" style="font-size:12px; font-weight:700; color:${assigneeName ? 'var(--charcoal)' : 'var(--charcoal-soft)'};">${assigneeName || 'Not assigned yet'}</span>
+        <span id="verifyAssigneeLabel_${key}" style="font-size:12px; font-weight:700; color:${assigneeName ? 'var(--charcoal)' : 'var(--charcoal-soft)'};">${assigneeName || 'Not assigned yet'}</span>${assignedDateHtml}
         ${isTeamLeader ? `
           <button type="button" class="action-btn" style="background:var(--surface-2); color:var(--charcoal); border:1px solid var(--border);" onclick="toggleAssignPicker('${type}',${num})">👤 ${assigneeName ? 'Change' : 'Assign'} Verifier</button>
           <select id="verifyAssignSelect_${key}" class="form-control hidden" style="max-width:220px;" onchange="assignVerifyPerson('${type}',${num}, this.value)">
@@ -8347,6 +8368,25 @@
       </div>
     `;
 
+    // NG re-verification — Team-Leader-only: lets them push a new Effective
+    // Date onto this action and reset it for a fresh verify cycle, per
+    // request ("if NG, have button for change effective date, and after
+    // change ... click assign again for make the re-verification again").
+    // Clears this action's result/reason/assignee/timestamps (both locally
+    // and in the persisted JSON fields) so the "Assign Verifier" control
+    // above starts genuinely fresh — see confirmChangeEffDateAndReVerify().
+    const reVerifyHtml = (isTeamLeader && state.result === 'NG') ? `
+      <div style="margin-top:12px; padding:10px 12px; background:#fff0f0; border:1px solid #f5c2c2; border-radius:8px;">
+        <div style="font-size:11px; color:#a3262b; font-weight:700; margin-bottom:8px;">❌ This action was marked NG. Set a new Effective Date to give it another chance — this clears the NG result and assignment so it can be verified again from scratch.</div>
+        <button type="button" id="reVerifyToggle_${key}" class="action-btn" style="background:var(--surface-2); color:var(--charcoal); border:1px solid var(--border);" onclick="document.getElementById('reVerifyToggle_${key}').classList.add('hidden'); document.getElementById('reVerifyForm_${key}').classList.remove('hidden');">🔁 Change Effective Date & Re-Verify</button>
+        <div id="reVerifyForm_${key}" class="hidden" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px;">
+          <input type="date" id="reVerifyEffInput_${key}" class="form-control" style="max-width:160px;" value="${escapeHtml(eff || '')}">
+          <button type="button" id="reVerifyConfirmBtn_${key}" class="action-btn" style="background:var(--red); color:#fff;" onclick="confirmChangeEffDateAndReVerify('${type}',${num})">✔ Confirm & Reset</button>
+          <button type="button" class="action-btn" style="background:var(--surface-2); color:var(--charcoal); border:1px solid var(--border);" onclick="document.getElementById('reVerifyForm_${key}').classList.add('hidden'); document.getElementById('reVerifyToggle_${key}').classList.remove('hidden');">Cancel</button>
+        </div>
+      </div>
+    ` : '';
+
     const wrap = document.createElement('div');
     wrap.className = 'action-block';
     wrap.id = `verifyBlock_${type}_${num}`;
@@ -8363,6 +8403,7 @@
       ${verifiedDateHtml}
       ${assignRowHtml}
       ${actionControlsHtml}
+      ${reVerifyHtml}
     `;
     containerEl.appendChild(wrap);
     _renderDocChips(docContainerId, canAct);
@@ -8429,6 +8470,80 @@
         ? '<span class="status-badge status-verified">VERIFIED</span>'
         : (badgeEl.dataset.dateBadge || '');
     }
+  }
+
+  /** Removes one key from a JSON-object-shaped verification field
+   *  (verificationAssignees/verificationTimestamps/verificationAssigneeTimestamps)
+   *  without disturbing any other key — shared by
+   *  confirmChangeEffDateAndReVerify()'s reset below. */
+  function _removeKeyFromJsonField(raw, key) {
+    try {
+      const obj = JSON.parse(raw || '{}');
+      delete obj[key];
+      return JSON.stringify(obj);
+    } catch (_) { return raw || '{}'; }
+  }
+
+  /** NG re-verification (Team-Leader-only): pushes a new Effective Date
+   *  onto this ONE action within actionPlan, then resets everything about
+   *  its PREVIOUS verify cycle — result, reason, assignee, verified
+   *  timestamp, assignment timestamp — both locally and in the persisted
+   *  fields, so "Assign Verifier" starts genuinely fresh (a fresh
+   *  assignedAt is exactly what makes computeNotifyShopScore()'s clock-start
+   *  MAX(effective, assigned) correct for the new cycle instead of
+   *  reusing stale data from the NG'd attempt). Persists via the SAME two
+   *  flows the Considerations tab and Submit Verification already use —
+   *  no new flow/schema needed. Deliberately sends empty
+   *  verificationImagesBase64/documentsBase64 (nothing changed about
+   *  evidence here) rather than re-resolving every other action's photos/
+   *  docs just for this metadata-only save. */
+  async function confirmChangeEffDateAndReVerify(type, num) {
+    const key = `${type}_${num}`;
+    const input = document.getElementById(`reVerifyEffInput_${key}`);
+    const newEff = input && input.value;
+    if (!newEff) { alert('Please pick a new Effective Date.'); return; }
+    if (!confirm(`Set Effective Date to ${newEff} for ${type} Action #${num} and reset it for re-verification?\n\nThis clears its NG result and current assignment — you'll need to click "Assign Verifier" again.`)) return;
+
+    const btn = document.getElementById(`reVerifyConfirmBtn_${key}`);
+    if (btn) { btn.disabled = true; btn.innerText = 'Saving…'; }
+
+    try {
+      const apText = resolveField(selectedClaimData, ['actionPlan', 'ActionPlan', 'action_plan'], '');
+      const newApText = _rewriteActionEffDate(apText, type, num, newEff);
+      selectedClaimData.actionPlan = newApText;
+
+      delete verifyState[key];
+      selectedClaimData.verificationAssignees          = _removeKeyFromJsonField(resolveField(selectedClaimData, ['verificationAssignees', 'VerificationAssignees'], '{}'), key);
+      selectedClaimData.verificationTimestamps         = _removeKeyFromJsonField(resolveField(selectedClaimData, ['verificationTimestamps', 'VerificationTimestamps'], '{}'), key);
+      selectedClaimData.verificationAssigneeTimestamps = _removeKeyFromJsonField(resolveField(selectedClaimData, ['verificationAssigneeTimestamps', 'VerificationAssigneeTimestamps'], '{}'), key);
+
+      const verifDataRaw = resolveField(selectedClaimData, ['verificationData', 'VerificationData'], '');
+      const resultLineRe = new RegExp(`\\[${type}\\s*${num}\\]\\s*(?:OK|NG)\\s*(?::\\s*[\\s\\S]*?)?\\s*(?=\\n\\n\\[(?:Corrective|Preventive)\\s*\\d+\\]|$)`, 'i');
+      selectedClaimData.verificationData = verifDataRaw.replace(resultLineRe, '').replace(/\n{3,}/g, '\n\n').trim();
+
+      const considUrl = (SAVE_CONSIDERATIONS_URL && !SAVE_CONSIDERATIONS_URL.startsWith('PASTE_')) ? SAVE_CONSIDERATIONS_URL : SAVE_INVESTIGATION_URL;
+      await fetch(considUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: selectedClaimId.toString(), actionPlan: newApText, tabSave: 'considerations' }) });
+
+      await fetch(SAVE_VERIFICATION_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: selectedClaimId.toString(),
+          status: (selectedClaimData && selectedClaimData.status) || 'QC Investigated',
+          verifyStatus: 'Pending', // an action just got reset to unverified -- can never be "fully Verified" right now
+          verificationData: selectedClaimData.verificationData,
+          verificationAssignees: selectedClaimData.verificationAssignees,
+          verificationTimestamps: selectedClaimData.verificationTimestamps,
+          verificationAssigneeTimestamps: selectedClaimData.verificationAssigneeTimestamps,
+          verificationVideo: '[]',
+          verificationImagesBase64: [],
+          verificationDocumentsBase64: [],
+          verificationLog: resolveField(selectedClaimData, ['verificationLog', 'VerificationLog'], '')
+        })
+      });
+    } catch (e) {
+      console.log('confirmChangeEffDateAndReVerify save (CORS suppressed):', e);
+    }
+    openVerifyWorkspace(selectedClaimData);
   }
 
   function closeVerifyWorkspace() {
