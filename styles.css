@@ -1179,6 +1179,15 @@ textarea.form-control {
 .data-table tbody tr:nth-child(even) td { background: #fafafa; }
 .data-table tbody tr:nth-child(even):hover td { background: #fff5f7; }
 
+/* Row highlight — Claims Awaiting Verification: this row has an action
+   still awaiting the CURRENTLY LOGGED-IN user's verification (see
+   getVerifyRowModel's assignedToMe / renderVerifyQueueTable). !important
+   overrides the plain/even-stripe/hover td backgrounds above, which are
+   otherwise equal-or-higher specificity and would win. */
+.data-table tbody tr.row-assigned-to-me td { background: #fff3cd !important; }
+.data-table tbody tr.row-assigned-to-me:hover td { background: #ffe9a8 !important; }
+.data-table tbody tr.row-assigned-to-me td:first-child { border-left-color: #f0b429; }
+
 /* â”€â”€ Status badges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .status-badge { display:inline-flex; padding:4px 10px; border-radius:var(--r-full); font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; background:var(--ivory-deep); color:var(--charcoal-soft); white-space:nowrap; }
 .status-active { background:var(--red-subtle); color:var(--red); border:1px solid rgba(218,0,55,0.2); }

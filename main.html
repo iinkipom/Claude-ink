@@ -1375,6 +1375,32 @@
   //                                           at max(Effective Date, this
   //                                           timestamp), not Effective Date
   //                                           alone).
+  //     verificationNgCounts:      string  — JSON: {"Corrective_1": 2, ...}
+  //                                           — how many times THAT action
+  //                                           has been marked NG and reset
+  //                                           for another cycle (see
+  //                                           confirmChangeEffDateAndReVerify()).
+  //                                           NEW column, same JSON-string
+  //                                           pattern as verificationTimestamps
+  //                                           — add a matching
+  //                                           VerificationNgCounts column
+  //                                           and a mapping in the "Select"
+  //                                           action that builds claims.js,
+  //                                           next to the existing
+  //                                           verificationTimestamps mapping
+  //                                           — skipping that mapping is
+  //                                           exactly what made the OLD
+  //                                           meetingDate field read
+  //                                           "missing" even after a real
+  //                                           save (see the SEND_APPOINTMENT_URL
+  //                                           comment), so don't repeat it
+  //                                           here. Read back by
+  //                                           computeNotifyShopScore()'s
+  //                                           Player branch to cap each
+  //                                           action's CURRENT cycle's score
+  //                                           range — 10 points off the top
+  //                                           per NG cycle, floored at the
+  //                                           range's min.
   //     verificationVideo:         string  — always sent as "[]" now (the
   //                                           video-link input was replaced
   //                                           by document attachment below,
@@ -3952,14 +3978,44 @@
     if (stored && stored.length) return stored;
 
     const container = document.getElementById(containerId);
-    if (!container) return [];
     const out = [];
-    for (const img of Array.from(container.querySelectorAll('img'))) {
-      const src = img.src;
-      if (!src) continue;
-      if (src.startsWith('data:')) { out.push({ name: img.title || 'image.jpg', dataUrl: src }); continue; }
+    if (container) {
+      for (const img of Array.from(container.querySelectorAll('img'))) {
+        const src = img.src;
+        if (!src) continue;
+        if (src.startsWith('data:')) { out.push({ name: img.title || 'image.jpg', dataUrl: src }); continue; }
+        try {
+          const resp = await fetch(src);
+          const blob = await resp.blob();
+          const dataUrl = await new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result);
+            r.onerror = reject;
+            r.readAsDataURL(blob);
+          });
+          out.push({ name: img.title || 'image.jpg', dataUrl });
+        } catch (e) {
+          console.warn('[_resolveExistingPhotosForSave] could not re-fetch existing photo, it will be missing from this save:', src, e);
+        }
+      }
+      return out;
+    }
+
+    // No live DOM container for this key at all — e.g. a Player's filtered
+    // Verify Claim view only renders their own assigned action(s) (see
+    // openVerifyWorkspace's myAssignedKeysForFilter), so a DIFFERENT
+    // action's preview container never gets created in their DOM. Fall
+    // back to the URL-only store instead — populated unconditionally by
+    // _restoreVerificationPhotosFromUrls regardless of DOM presence — so
+    // this action's already-saved evidence still gets re-sent. Skipping
+    // this would silently drop it: SAVE_VERIFICATION_URL's write is a full
+    // replace, not an append (see _refreshVerificationEvidenceStores'
+    // comment for the exact "Rampai's submit wiped Tanachit's and Sujit's"
+    // bug that same failure mode already caused once for documents).
+    const urls = verificationImageUrlStore[containerId] || [];
+    for (const url of urls) {
       try {
-        const resp = await fetch(src);
+        const resp = await fetch(url);
         const blob = await resp.blob();
         const dataUrl = await new Promise((resolve, reject) => {
           const r = new FileReader();
@@ -3967,9 +4023,10 @@
           r.onerror = reject;
           r.readAsDataURL(blob);
         });
-        out.push({ name: img.title || 'image.jpg', dataUrl });
+        const filename = decodeURIComponent((String(url).split('/').pop() || '').split('?')[0]) || 'image.jpg';
+        out.push({ name: filename, dataUrl });
       } catch (e) {
-        console.warn('[_resolveExistingPhotosForSave] could not re-fetch existing photo, it will be missing from this save:', src, e);
+        console.warn('[_resolveExistingPhotosForSave] could not re-fetch existing photo (no DOM container), it will be missing from this save:', url, e);
       }
     }
     return out;
@@ -4768,7 +4825,19 @@
      "average per-bucket, not per-item" convention as the radar chart's
      weekly/monthly buckets. An action whose clock-start hasn't been
      reached yet, or where this player isn't assigned anything at all,
-     doesn't count against them yet. */
+     doesn't count against them yet.
+
+     NG re-verify range cap — revised per request: an OK result never
+     changes anything (still scored on speed alone, up to the claim's full
+     range). An NG means the Team Leader resets the action for another
+     cycle (confirmChangeEffDateAndReVerify — new Effective Date, clears
+     assignee/result/timestamps) and bumps verificationNgCounts[key]. THAT
+     re-verify's score is capped 10 points lower per prior NG cycle — e.g.
+     tier 5's normal 55-100 becomes 55-90 for the cycle right after the
+     first NG, 55-80 after a second, and so on (tier 4's 2-50 shrinks the
+     same way) — however fast the re-verify itself gets submitted, it
+     can't out-score getting it right the first time. Floored at the
+     range's own min so it can never invert. */
   function computeNotifyShopScore(claim, role) {
     if (isLowTierFixedScore(claim)) return { score: 2, fixed: true };
     const range = getEvaluateScoreRange(claim);
@@ -4780,6 +4849,7 @@
       const apText = resolveField(claim, ['actionPlan', 'ActionPlan', 'action_plan'], '');
       const timestamps = _getVerificationTimestamps(claim);
       const assignedAt = _getVerificationAssigneeTimestamps(claim);
+      const ngCounts = _getVerificationNgCounts(claim);
       const today = new Date(); today.setHours(0, 0, 0, 0);
 
       let anyReached = false;
@@ -4799,7 +4869,13 @@
         if (!ts) return; // reached, but this player hasn't submitted their verification yet
         const days = calculateClaimTakeTime(clockStart, ts), hours = _hoursBetween(clockStart, ts);
         const rank = _dayRankIndex(days) * 3 + _hoursRankIndex(hours);
-        scores.push(_interpScore(rank, 15, range));
+        // This action's OWN cycle range — 10 points off the normal max per
+        // prior NG cycle on THIS key, floored at range.min. ngCount is 0
+        // until the first NG+reset ever happens, so a clean first pass
+        // (OK or still-pending NG) is unaffected.
+        const ngCount = ngCounts[key] || 0;
+        const cycleRange = ngCount > 0 ? { min: range.min, max: Math.max(range.min, range.max - ngCount * 10) } : range;
+        scores.push(_interpScore(rank, 15, cycleRange));
       });
 
       if (!anyReached) return { score: null, reason: 'ยังไม่ถึงวันที่ Effective Date หรือยังไม่ได้รับมอบหมาย Action ที่คุณรับผิดชอบ' };
@@ -4865,7 +4941,7 @@
     {
       key:        'evalNotifySpeed',
       title:      'คุณสามารถส่ง Minutes Meeting แจ้งคำร้องเรียนให้หน่วยงานที่เกี่ยวข้องทราบปัญหา ได้ภายใน 2 วันทำการ (Team Leader) / ความเร็วในการตรวจสอบ (Verify) Action ที่ได้รับมอบหมายหลังถึงกำหนด Effective Date (Player)',
-      detail:     'Team Leader: คำนวณอัตโนมัติจากเวลาที่ส่ง Minutes Meeting และปิดเคส · Player: คำนวณอัตโนมัติจากระยะเวลานับตั้งแต่ Effective Date ของ Action ที่ได้รับมอบหมายให้ตรวจสอบ (หน้า Verify Claim) จนถึงเวลาที่คุณส่งผลตรวจสอบ ไม่ต้องกรอกข้อมูลเพิ่มเติม',
+      detail:     'Team Leader: คำนวณอัตโนมัติจากเวลาที่ส่ง Minutes Meeting และปิดเคส · Player: คำนวณอัตโนมัติจากระยะเวลานับตั้งแต่ Effective Date ของ Action ที่ได้รับมอบหมายให้ตรวจสอบ (หน้า Verify Claim) จนถึงเวลาที่คุณส่งผลตรวจสอบ ไม่ต้องกรอกข้อมูลเพิ่มเติม · หากผล NG ต้องตรวจสอบใหม่ คะแนนสูงสุดที่ทำได้ในรอบถัดไปจะลดลงครั้งละ 10 คะแนน',
       inputType:  'auto',
       computeFn:  computeNotifyShopScore,
       appliesTo:  ['Team Leader', 'Player']
@@ -7819,9 +7895,26 @@
      `verificationAssignees`: {"Corrective_1":{empId,firstName,lastName},
      "Preventive_2":{...}}. Only the Team Leader sees the assign control;
      everyone else sees a read-only "Assigned to: X" label. The assigned
-     player can attach evidence + OK/NG on THEIR action(s) only — every
-     other action on the same claim is read-only for them, even though
-     they can still see it for context.
+     player can attach evidence + OK/NG on THEIR action(s) only — a Player
+     only sees THEIR assigned action(s) at all here (everything else on the
+     claim is just noise for someone who can't act on it — see
+     openVerifyWorkspace's myAssignedKeysForFilter); Team Leader and 4Dx
+     Mentor still see every action, for monitoring, and only the Team
+     Leader can assign.
+
+     ── NG re-verify scoring (Evaluate subject 5, Player) ────────────────
+     `verificationNgCounts`: {"Corrective_1": 2, ...} — how many times EACH
+     action has been marked NG and reset for another cycle (incremented by
+     confirmChangeEffDateAndReVerify(), never reset). computeNotifyShopScore()'s
+     Player branch uses it to cap that action's score range for its CURRENT
+     cycle: cycle 0 (never NG'd) scores against the claim's normal range
+     (e.g. tier 5's 55-100); every NG cycle after that lowers the max by 10
+     (55-90, then 55-80, ...), floored at the range's min — so a first-time
+     OK still earns full marks, but a re-verify after an NG physically can't
+     score as high as getting it right the first time, no matter how fast
+     the re-verify itself is submitted. Same -10/cycle rule for tier 4's
+     2-50 range too — the formula doesn't special-case which tier it's
+     shrinking, so both already move identically.
      ═══════════════════════════════════════════════════════════════════════ */
   let verifyState = {}; // `${type}_${num}` -> { result: 'OK'|'NG'|null, reason: '', assignee: {empId,firstName,lastName}|null }
 
@@ -7844,6 +7937,16 @@
    *  keys fall back to the Effective Date alone (see computeNotifyShopScore). */
   function _getVerificationAssigneeTimestamps(claim) {
     try { return JSON.parse(resolveField(claim || {}, ['verificationAssigneeTimestamps', 'VerificationAssigneeTimestamps'], '{}')) || {}; }
+    catch (_) { return {}; }
+  }
+
+  /** How many times EACH `${type}_${num}` action has been marked NG and
+   *  reset for another verify cycle — JSON map of key -> integer count,
+   *  never reset back down. Used by computeNotifyShopScore()'s Player
+   *  branch to cap a re-verified action's score range (see the flow-spec
+   *  comment above this VERIFY CLAIM section for the full rule). */
+  function _getVerificationNgCounts(claim) {
+    try { return JSON.parse(resolveField(claim || {}, ['verificationNgCounts', 'VerificationNgCounts'], '{}')) || {}; }
     catch (_) { return {}; }
   }
 
@@ -8038,6 +8141,18 @@
     const verifyStatusVal = resolveField(claim, ['verifyStatus', 'VerifyStatus'], '');
     const isComplete = verifyStatusVal === 'Verified' || (totalActions > 0 && verifiedActions === totalActions);
 
+    // Row highlight — "assigned to me" per request: the CURRENTLY LOGGED-IN
+    // user is the assigned verify person on at least one action here that
+    // still needs verifying (e.g. Claim 26-013, Corrective Action 1 ->
+    // assigned to Tanachit highlights that row in Tanachit's queue view).
+    // Only counts PENDING assignments — an action already verified doesn't
+    // need acknowledging anymore, so it doesn't keep the row highlighted.
+    const myPendingKeys = _myVerificationAssignments(claim).filter(key => {
+      const st = verifyState[key];
+      return !(st && st.result);
+    });
+    const assignedToMe = myPendingKeys.length > 0;
+
     return {
       claim, runNo,
       claimNo: cNo,
@@ -8047,6 +8162,7 @@
       correctiveCount, preventiveCount,
       totalActions, verifiedActions, readyActions, okActions, ngActions, isComplete,
       statusLabel: isComplete ? 'VERIFIED' : 'QC INVESTIGATED',
+      assignedToMe, myPendingCount: myPendingKeys.length,
     };
   }
 
@@ -8160,8 +8276,14 @@
       const tr = document.createElement('tr');
       tr.style.cursor = 'pointer';
       tr.onclick = () => openVerifyWorkspace(r.claim);
+      // Highlight this row when the CURRENTLY LOGGED-IN user has a pending
+      // verify assignment on it — see getVerifyRowModel's assignedToMe.
+      if (r.assignedToMe) tr.classList.add('row-assigned-to-me');
+      const mineBadgeHtml = r.assignedToMe
+        ? `<span class="status-badge" style="background:#f0b429;color:#4a3200;border:1px solid #c98f10;margin-left:6px;" title="You are the assigned verify person on ${r.myPendingCount} action(s) here">👤 Assigned to you</span>`
+        : '';
       tr.innerHTML = `
-        <td style="font-weight:800;color:var(--red);white-space:nowrap;font-size:12px;">${r.claimNo}</td>
+        <td style="font-weight:800;color:var(--red);white-space:nowrap;font-size:12px;">${r.claimNo}${mineBadgeHtml}</td>
         <td style="font-weight:700;">${r.subject}</td>
         <td style="font-size:11px;">${r.shop}</td>
         <td style="font-size:11px;white-space:nowrap;">${r.closeDateDisplay}</td>
@@ -8527,6 +8649,21 @@
     } catch (_) { return raw || '{}'; }
   }
 
+  /** Increments one integer counter inside a JSON-object-shaped field
+   *  (verificationNgCounts) without disturbing any other key — used by
+   *  confirmChangeEffDateAndReVerify() below to count how many times THIS
+   *  action has been NG'd and reset, for computeNotifyShopScore()'s
+   *  per-cycle score-range cap (see the flow-spec comment at the top of
+   *  the VERIFY CLAIM section). Never decremented — a re-verify cycle
+   *  always costs the same 10-point cap, however many times it repeats. */
+  function _incrementKeyInJsonField(raw, key) {
+    try {
+      const obj = JSON.parse(raw || '{}');
+      obj[key] = (Number(obj[key]) || 0) + 1;
+      return JSON.stringify(obj);
+    } catch (_) { const obj = {}; obj[key] = 1; return JSON.stringify(obj); }
+  }
+
   /** NG re-verification (Team-Leader-only): pushes a new Effective Date
    *  onto this ONE action within actionPlan, then resets everything about
    *  its PREVIOUS verify cycle — result, reason, assignee, verified
@@ -8559,6 +8696,11 @@
       selectedClaimData.verificationAssignees          = _removeKeyFromJsonField(resolveField(selectedClaimData, ['verificationAssignees', 'VerificationAssignees'], '{}'), key);
       selectedClaimData.verificationTimestamps         = _removeKeyFromJsonField(resolveField(selectedClaimData, ['verificationTimestamps', 'VerificationTimestamps'], '{}'), key);
       selectedClaimData.verificationAssigneeTimestamps = _removeKeyFromJsonField(resolveField(selectedClaimData, ['verificationAssigneeTimestamps', 'VerificationAssigneeTimestamps'], '{}'), key);
+      // This button only ever shows on an NG'd action (see reVerifyHtml in
+      // _renderVerifyActionBlock), so every reset here is genuinely one
+      // more NG cycle — bump the counter computeNotifyShopScore()'s Player
+      // branch uses to cap the NEXT cycle's score range.
+      selectedClaimData.verificationNgCounts           = _incrementKeyInJsonField(resolveField(selectedClaimData, ['verificationNgCounts', 'VerificationNgCounts'], '{}'), key);
 
       const verifDataRaw = resolveField(selectedClaimData, ['verificationData', 'VerificationData'], '');
       const resultLineRe = new RegExp(`\\[${type}\\s*${num}\\]\\s*(?:OK|NG)\\s*(?::\\s*[\\s\\S]*?)?\\s*(?=\\n\\n\\[(?:Corrective|Preventive)\\s*\\d+\\]|$)`, 'i');
@@ -8577,6 +8719,7 @@
           verificationAssignees: selectedClaimData.verificationAssignees,
           verificationTimestamps: selectedClaimData.verificationTimestamps,
           verificationAssigneeTimestamps: selectedClaimData.verificationAssigneeTimestamps,
+          verificationNgCounts: selectedClaimData.verificationNgCounts,
           verificationVideo: '[]',
           verificationImagesBase64: [],
           verificationDocumentsBase64: [],
@@ -8670,6 +8813,18 @@
     // access gate on opening the workspace itself, just role === null for
     // anyone who isn't the Team Leader or an assigned Player, which
     // correctly renders every action read-only for them.
+    //
+    // Per request: a Player only sees the action(s) actually ASSIGNED to
+    // them here (everything else is noise for someone who can't act on it
+    // anyway) — Team Leader and 4Dx Mentor (role !== 'Player', including
+    // the null case below) keep seeing every action, for monitoring, and
+    // only the Team Leader gets the assign controls (canAct/isTeamLeader
+    // inside _renderVerifyActionBlock already gate that). NOTE:
+    // submitVerification() below does NOT rely on which blocks got
+    // rendered here — it re-derives the full action list itself, so a
+    // Player's narrower view here can never drop another action's already-
+    // saved result/evidence when they submit.
+    const myAssignedKeysForFilter = role === 'Player' ? _myVerificationAssignments(claim) : null;
 
     const verifyImgRaw = claim.verificationImages || claim.VerificationImages || '';
     const verifyDocRaw = claim.verificationDocuments || claim.VerificationDocuments || '';
@@ -8678,13 +8833,21 @@
     const preventiveByBlock = _extractActionTextByBlock(apText, 'Preventive');
     const correctiveImgNums = _extractTaggedBlockNumbers(verifyImgRaw, /VerifyCorrective(\d+)_/i);
     const preventiveImgNums = _extractTaggedBlockNumbers(verifyImgRaw, /VerifyPreventive(\d+)_/i);
-    const correctiveNums = Array.from(new Set([...Object.keys(correctiveByBlock).map(Number), ...correctiveImgNums])).sort((a, b) => a - b);
-    const preventiveNums = Array.from(new Set([...Object.keys(preventiveByBlock).map(Number), ...preventiveImgNums])).sort((a, b) => a - b);
+    let correctiveNums = Array.from(new Set([...Object.keys(correctiveByBlock).map(Number), ...correctiveImgNums])).sort((a, b) => a - b);
+    let preventiveNums = Array.from(new Set([...Object.keys(preventiveByBlock).map(Number), ...preventiveImgNums])).sort((a, b) => a - b);
+    if (myAssignedKeysForFilter) {
+      correctiveNums = correctiveNums.filter(n => myAssignedKeysForFilter.includes(`Corrective_${n}`));
+      preventiveNums = preventiveNums.filter(n => myAssignedKeysForFilter.includes(`Preventive_${n}`));
+    }
 
-    if (!correctiveNums.length) correctiveWrap.innerHTML = '<p style="font-size:12px;color:var(--charcoal-soft);">No corrective actions were recorded for this claim.</p>';
+    if (!correctiveNums.length) correctiveWrap.innerHTML = myAssignedKeysForFilter
+      ? '<p style="font-size:12px;color:var(--charcoal-soft);">No corrective actions are assigned to you for verification on this claim.</p>'
+      : '<p style="font-size:12px;color:var(--charcoal-soft);">No corrective actions were recorded for this claim.</p>';
     else correctiveNums.forEach(n => _renderVerifyActionBlock('Corrective', n, correctiveByBlock[n] || { text: '', eff: '', due: '' }, correctiveWrap, role));
 
-    if (!preventiveNums.length) preventiveWrap.innerHTML = '<p style="font-size:12px;color:var(--charcoal-soft);">No preventive actions were recorded for this claim.</p>';
+    if (!preventiveNums.length) preventiveWrap.innerHTML = myAssignedKeysForFilter
+      ? '<p style="font-size:12px;color:var(--charcoal-soft);">No preventive actions are assigned to you for verification on this claim.</p>'
+      : '<p style="font-size:12px;color:var(--charcoal-soft);">No preventive actions were recorded for this claim.</p>';
     else preventiveNums.forEach(n => _renderVerifyActionBlock('Preventive', n, preventiveByBlock[n] || { text: '', eff: '', due: '' }, preventiveWrap, role));
 
     // Restore evidence photos PER CONTAINER — always start from the saved
@@ -8761,12 +8924,32 @@
       const assignedAt = _getVerificationAssigneeTimestamps(selectedClaimData);
       const nowIso = new Date().toISOString();
 
+      // Enumerate EVERY action on the claim (from actionPlan + any tagged
+      // evidence), NOT just whatever's currently rendered in the DOM —
+      // same union logic openVerifyWorkspace uses to decide correctiveNums/
+      // preventiveNums. This matters now that a Player's view only renders
+      // their OWN assigned action(s) (see openVerifyWorkspace's
+      // myAssignedKeysForFilter): iterating DOM `.action-block`s here would
+      // silently drop every OTHER action's already-saved result/evidence
+      // from verificationData/verificationImages/verificationDocuments on
+      // save, since SAVE_VERIFICATION_URL fully replaces those fields
+      // rather than appending. verifyState already holds every key's state
+      // regardless of what's rendered (populated unfiltered in
+      // openVerifyWorkspace), so this is a safe, complete source of truth.
+      const _apTextForSubmit = resolveField(selectedClaimData, ['actionPlan', 'ActionPlan', 'action_plan'], '');
+      const _verifyImgRawForSubmit = selectedClaimData.verificationImages || selectedClaimData.VerificationImages || '';
+      const _allByBlock = {
+        Corrective: _extractActionTextByBlock(_apTextForSubmit, 'Corrective'),
+        Preventive: _extractActionTextByBlock(_apTextForSubmit, 'Preventive'),
+      };
+      const _allImgNums = {
+        Corrective: _extractTaggedBlockNumbers(_verifyImgRawForSubmit, /VerifyCorrective(\d+)_/i),
+        Preventive: _extractTaggedBlockNumbers(_verifyImgRawForSubmit, /VerifyPreventive(\d+)_/i),
+      };
+
       for (const type of ['Corrective', 'Preventive']) {
-        const wrap = document.getElementById(type === 'Corrective' ? 'verifyCorrectiveWrap' : 'verifyPreventiveWrap');
-        for (const block of Array.from(wrap.querySelectorAll('.action-block'))) {
-          const m = block.id.match(/^verifyBlock_(Corrective|Preventive)_(\d+)$/);
-          if (!m) continue;
-          const num = m[2];
+        const allNums = Array.from(new Set([...Object.keys(_allByBlock[type]).map(Number), ..._allImgNums[type]])).sort((a, b) => a - b);
+        for (const num of allNums) {
           const key = `${type}_${num}`;
           const state = verifyState[key] || {};
           totalBlocks++;
@@ -8850,6 +9033,12 @@
         verificationAssignees: JSON.stringify(assignees),
         verificationAssigneeTimestamps: JSON.stringify(assignedAt),
         verificationTimestamps: JSON.stringify(timestamps),
+        // Carried forward unchanged — this submit never resets an NG cycle
+        // (only confirmChangeEffDateAndReVerify() bumps it), but it's
+        // resent every time anyway so the flow's write never blanks the
+        // column out, same reasoning as every other carried-forward field
+        // on this payload.
+        verificationNgCounts: resolveField(selectedClaimData, ['verificationNgCounts', 'VerificationNgCounts'], '{}'),
         verificationVideo: '[]', // evidence video link input was replaced by document attach — see verificationDocumentsBase64 below
         verificationImagesBase64: verifyImgs.map(obj => ({ name: obj.name, content: obj.dataUrl.split(',')[1] })),
         verificationDocumentsBase64: verifyDocs.map(obj => ({ name: obj.name, content: obj.dataUrl.split(',')[1] })),
