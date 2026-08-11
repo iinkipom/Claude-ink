@@ -1239,6 +1239,18 @@
   //   3. Chain the "regenerate claims.js" step at the end, like every other
   //      save flow, so step 2's write is actually visible next reload.
   const SAVE_EVALUATION_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/bf0625c761ce423eab7a49021b7928a2/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=pd-fHiPSTX1L7wRhxi_q62AR5yIDvPqSs7C7RJ44NqM";
+  // ── APPOINTMENT / MINUTES MEETING URL ────────────────────────────────────
+  // Fired by TWO different places, both with a small { id, ..., tabSave }
+  // payload (falls back to SAVE_INVESTIGATION_URL if left as a placeholder):
+  //   makeAppointment()       -> { id, meetingDate,       tabSave: 'appointment'    } -> MeetingDate column
+  //   submitMinutesMeeting()  -> { id, minutesMeetingDate, tabSave: 'minutesMeeting' } -> MinutesMeetingDate column (NEW)
+  // Evaluate subject 5 (evalNotifySpeed)'s Team Leader branch gates on
+  // minutesMeetingDate now, NOT meetingDate (revised per request — see
+  // computeNotifyShopScore()). MinutesMeetingDate needs (a) a matching
+  // SharePoint column, and (b) that column added to whatever "Select"
+  // action builds claims.js — skipping (b) is exactly what made the OLD
+  // meetingDate gate read "missing" even after a real save, so don't repeat
+  // that here.
   const SEND_APPOINTMENT_URL    = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/09/workflows/6f54d1eaac304cc7a07b06bfbacb4afb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=-OjO9tNatXGt_oCEQ-wJHZUBJKMdk0Vyp6jawH-1zvw";
   // ── CLAIM MONITOR "Edit Details" URL ────────────────────────────────────
   // Fired by saveClaimEdit() when the Claim Monitor pane's "✏️ Edit Details"
@@ -3762,6 +3774,29 @@
     setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 3000);
     if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.origText || btn.innerHTML; }
     setTimeout(function() { alert('📧 Minutes Meeting email ready!\nClick the .eml file in your download bar to open in Outlook Classic.'); }, 500);
+
+    // ── Record minutesMeetingDate timestamp — Evaluate subject 5's Team
+    // Leader gate now checks THIS instead of meetingDate/"Make Appointment"
+    // (revised per request: "change condition ... to timestamp of clicking
+    // the submit minutes meeting"). See computeNotifyShopScore()'s TL
+    // branch. Fire-and-forget, same pattern makeAppointment() already uses
+    // for meetingDate — reuses SEND_APPOINTMENT_URL (falls back to
+    // SAVE_INVESTIGATION_URL) rather than a whole new flow; the flow's
+    // Update item action just needs ONE more field mapped:
+    // minutesMeetingDate -> a new MinutesMeetingDate column, AND that
+    // column added to whatever "Select" action builds claims.js (same
+    // read-back requirement every other field in this app needs — skipping
+    // it is exactly what caused the old meetingDate bug this replaces).
+    if (selectedClaimId) {
+      const minutesMeetingDate = new Date().toISOString();
+      if (selectedClaimData) selectedClaimData.minutesMeetingDate = minutesMeetingDate;
+      const muUrl = (typeof SEND_APPOINTMENT_URL !== 'undefined' && !SEND_APPOINTMENT_URL.startsWith('PASTE_'))
+        ? SEND_APPOINTMENT_URL : SAVE_INVESTIGATION_URL;
+      fetch(muUrl, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedClaimId.toString(), minutesMeetingDate: minutesMeetingDate, tabSave: 'minutesMeeting' })
+      }).catch(function(e) { console.log('submitMinutesMeeting minutesMeetingDate save (CORS suppressed):', e); });
+    }
   }
 
   /* ── saveConsiderations — Considerations tab Save Draft button ───────────
@@ -4710,10 +4745,12 @@
     return { score: _interpScore(5 - Math.min(5, n), 5, range) };
   }
 
-  /* ── Subject 5: Notify Concerned Shop / Appointment (Team Leader) — OR —
+  /* ── Subject 5: Notify Concerned Shop / Minutes Meeting (Team Leader) — OR —
      Verification Speed (Player, added alongside Verify Claim).
      Team Leader span: earliest Finding Risk timestamp → CloseDate, gated
-     on an appointment (meetingDate) existing.
+     on the Minutes Meeting having been submitted (minutesMeetingDate) —
+     revised per request from the previous gate, an appointment
+     (meetingDate) existing.
      Player span: for every action they're the assigned "verify person" on
      (Verify Claim's per-action assignment — see openVerifyWorkspace), once
      BOTH that action's own Effective Date has been reached AND they've
@@ -4770,16 +4807,22 @@
       return { score: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) };
     }
 
-    // Team Leader (unchanged from before Verify Claim existed)
-    // Uses resolveField (not a plain claim.meetingDate||claim.MeetingDate
-    // check) because this SharePoint setup has been seen exposing
-    // multi-word columns in claims.js under an all-lowercase-after-first-
-    // letter internal name (e.g. findingRiskSubject -> "Findingrisksubject"
-    // — see _hasFindingRiskData()) rather than either camelCase form; a
-    // recorded appointment with no matching key here reads as "missing"
-    // even though makeAppointment() saved it correctly.
-    const meetingDate = resolveField(claim, ['meetingDate', 'MeetingDate', 'Meetingdate'], '');
-    if (!meetingDate) return { score: null, reason: 'No appointment recorded yet — click "Make Appointment" first.' };
+    // Team Leader — gate REVISED per request: was "has an appointment been
+    // made" (meetingDate, stamped by makeAppointment()); now "has the
+    // Minutes Meeting been submitted" (minutesMeetingDate, stamped by
+    // submitMinutesMeeting()) instead. The actual measured span below
+    // (earliest Finding Risk timestamp -> CloseDate) is unchanged — this
+    // field was only ever a yes/no gate, never part of the day/hour
+    // calculation itself, so swapping it is a safe 1:1 replacement.
+    // Uses resolveField (not a plain claim.minutesMeetingDate||... check)
+    // because this SharePoint setup has been seen exposing multi-word
+    // columns in claims.js under an all-lowercase-after-first-letter
+    // internal name (e.g. findingRiskSubject -> "Findingrisksubject" — see
+    // _hasFindingRiskData()) rather than either camelCase form; this is
+    // exactly what caused the old meetingDate version of this gate to read
+    // "missing" even after makeAppointment() saved it correctly.
+    const minutesMeetingDate = resolveField(claim, ['minutesMeetingDate', 'MinutesMeetingDate', 'Minutesmeetingdate'], '');
+    if (!minutesMeetingDate) return { score: null, reason: 'Minutes Meeting not submitted yet — click "Submit Minutes Meeting" first.' };
     const start = _firstFindingRiskTimestampOverall(claim);
     const end   = claim && (claim.closeDate || claim.CloseDate);
     if (!start || !end) return { score: null, reason: 'Missing Finding Risk timestamp or CloseDate — cannot calculate yet.' };
@@ -4821,8 +4864,8 @@
     },
     {
       key:        'evalNotifySpeed',
-      title:      'คุณสามารถนัดประชุมพูดคุยและแจ้งคำร้องเรียนให้หน่วยงานที่เกี่ยวข้องทราบปัญหา ได้ภายใน 2 วันทำการ (Team Leader) / ความเร็วในการตรวจสอบ (Verify) Action ที่ได้รับมอบหมายหลังถึงกำหนด Effective Date (Player)',
-      detail:     'Team Leader: คำนวณอัตโนมัติจากเวลานัดหมายและปิดเคส · Player: คำนวณอัตโนมัติจากระยะเวลานับตั้งแต่ Effective Date ของ Action ที่ได้รับมอบหมายให้ตรวจสอบ (หน้า Verify Claim) จนถึงเวลาที่คุณส่งผลตรวจสอบ ไม่ต้องกรอกข้อมูลเพิ่มเติม',
+      title:      'คุณสามารถส่ง Minutes Meeting แจ้งคำร้องเรียนให้หน่วยงานที่เกี่ยวข้องทราบปัญหา ได้ภายใน 2 วันทำการ (Team Leader) / ความเร็วในการตรวจสอบ (Verify) Action ที่ได้รับมอบหมายหลังถึงกำหนด Effective Date (Player)',
+      detail:     'Team Leader: คำนวณอัตโนมัติจากเวลาที่ส่ง Minutes Meeting และปิดเคส · Player: คำนวณอัตโนมัติจากระยะเวลานับตั้งแต่ Effective Date ของ Action ที่ได้รับมอบหมายให้ตรวจสอบ (หน้า Verify Claim) จนถึงเวลาที่คุณส่งผลตรวจสอบ ไม่ต้องกรอกข้อมูลเพิ่มเติม',
       inputType:  'auto',
       computeFn:  computeNotifyShopScore,
       appliesTo:  ['Team Leader', 'Player']
