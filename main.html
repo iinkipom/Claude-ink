@@ -7918,13 +7918,28 @@
      ═══════════════════════════════════════════════════════════════════════ */
   let verifyState = {}; // `${type}_${num}` -> { result: 'OK'|'NG'|null, reason: '', assignee: {empId,firstName,lastName}|null }
 
+  // All four getters below take a THIRD casing fallback —
+  // 'Verificationassignees' etc., all-lowercase-after-the-first-letter —
+  // alongside the plain camelCase/PascalCase forms. This SharePoint setup
+  // has repeatedly been seen exposing multi-word column names in claims.js
+  // under that mangled casing instead of either normal form (the exact bug
+  // that made meetingDate read "missing" even after a real save — see
+  // SEND_APPOINTMENT_URL's comment) — reported again here as "the row
+  // highlight only ever lights up for Tanachit, not other assigned users":
+  // whichever ONE claim happened to get its VerificationAssignees column
+  // exposed under a form these two-casing lookups actually matched worked;
+  // every other claim's assignee data silently read back as "{}" and
+  // never highlighted for anyone. Widening the lookup, not the matching
+  // logic itself, is the fix — _myVerificationAssignments() already
+  // compares against whichever profile is CURRENTLY logged in, so once
+  // the assignee data is actually found, it already works per-user.
   function _getVerificationAssignees(claim) {
-    try { return JSON.parse(resolveField(claim || {}, ['verificationAssignees', 'VerificationAssignees'], '{}')) || {}; }
+    try { return JSON.parse(resolveField(claim || {}, ['verificationAssignees', 'VerificationAssignees', 'Verificationassignees'], '{}')) || {}; }
     catch (_) { return {}; }
   }
 
   function _getVerificationTimestamps(claim) {
-    try { return JSON.parse(resolveField(claim || {}, ['verificationTimestamps', 'VerificationTimestamps'], '{}')) || {}; }
+    try { return JSON.parse(resolveField(claim || {}, ['verificationTimestamps', 'VerificationTimestamps', 'Verificationtimestamps'], '{}')) || {}; }
     catch (_) { return {}; }
   }
 
@@ -7936,7 +7951,7 @@
    *  Absent for a key means "assigned before this feature existed" — those
    *  keys fall back to the Effective Date alone (see computeNotifyShopScore). */
   function _getVerificationAssigneeTimestamps(claim) {
-    try { return JSON.parse(resolveField(claim || {}, ['verificationAssigneeTimestamps', 'VerificationAssigneeTimestamps'], '{}')) || {}; }
+    try { return JSON.parse(resolveField(claim || {}, ['verificationAssigneeTimestamps', 'VerificationAssigneeTimestamps', 'Verificationassigneetimestamps'], '{}')) || {}; }
     catch (_) { return {}; }
   }
 
@@ -7946,7 +7961,7 @@
    *  branch to cap a re-verified action's score range (see the flow-spec
    *  comment above this VERIFY CLAIM section for the full rule). */
   function _getVerificationNgCounts(claim) {
-    try { return JSON.parse(resolveField(claim || {}, ['verificationNgCounts', 'VerificationNgCounts'], '{}')) || {}; }
+    try { return JSON.parse(resolveField(claim || {}, ['verificationNgCounts', 'VerificationNgCounts', 'Verificationngcounts'], '{}')) || {}; }
     catch (_) { return {}; }
   }
 
@@ -7964,13 +7979,19 @@
   function _myVerificationAssignments(claim) {
     const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
     const myEmpId = String(profile.empId || '').trim();
-    const myName  = `${profile.firstName || ''} ${profile.lastName || ''}`.trim();
+    // Case-insensitive name compare — "Tanachit"-only matching turned out
+    // to also be a data-casing issue (see _getVerificationAssignees'
+    // comment), but a name typed/stored with different capitalization
+    // between registration and assignment is a second, independent way
+    // the exact-match version below could silently fail for someone other
+    // than whoever it happened to have been tested with.
+    const myName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim().toLowerCase();
     const assignees = _getVerificationAssignees(claim);
     return Object.keys(assignees).filter(key => {
       const a = assignees[key];
       if (!a) return false;
       const aEmpId = String(a.empId || '').trim();
-      const aName  = `${a.firstName || ''} ${a.lastName || ''}`.trim();
+      const aName  = `${a.firstName || ''} ${a.lastName || ''}`.trim().toLowerCase();
       if (myEmpId && aEmpId) return aEmpId === myEmpId;
       return aName && myName && aName === myName;
     });
