@@ -7979,21 +7979,37 @@
   function _myVerificationAssignments(claim) {
     const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
     const myEmpId = String(profile.empId || '').trim();
-    // Case-insensitive name compare — "Tanachit"-only matching turned out
-    // to also be a data-casing issue (see _getVerificationAssignees'
-    // comment), but a name typed/stored with different capitalization
-    // between registration and assignment is a second, independent way
-    // the exact-match version below could silently fail for someone other
-    // than whoever it happened to have been tested with.
-    const myName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim().toLowerCase();
+    // Case-insensitive, whitespace-collapsed name compare — "Tanachit"-only
+    // matching turned out to also be a data-casing issue (see
+    // _getVerificationAssignees' comment), but a name typed/stored with
+    // different capitalization or spacing between registration and
+    // assignment is a second, independent way an exact-match version could
+    // silently fail for someone other than whoever it happened to have
+    // been tested with.
+    const myName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim().toLowerCase().replace(/\s+/g, ' ');
     const assignees = _getVerificationAssignees(claim);
     return Object.keys(assignees).filter(key => {
       const a = assignees[key];
       if (!a) return false;
       const aEmpId = String(a.empId || '').trim();
-      const aName  = `${a.firstName || ''} ${a.lastName || ''}`.trim().toLowerCase();
-      if (myEmpId && aEmpId) return aEmpId === myEmpId;
-      return aName && myName && aName === myName;
+      const aName  = `${a.firstName || ''} ${a.lastName || ''}`.trim().toLowerCase().replace(/\s+/g, ' ');
+      // Match on EITHER empId OR name, not exclusively empId whenever both
+      // happen to be present — _getClaimPlayerSlots() (what
+      // assignVerifyPerson() actually assigns FROM) only ever carries a
+      // real empId when the Team Leader is assigning in the SAME browser
+      // session they just confirmed players in; reopening the claim later
+      // (a different day, a different device — the normal case) rebuilds
+      // the roster from name-only player1..player5 text, so the assignee
+      // almost always gets saved with empId: ''. The OLD "if both empId
+      // exist, ONLY trust empId" branch meant that on the rare claim where
+      // an assignee's empId WAS captured but didn't exactly match the
+      // logged-in profile's (whitespace, a stale/renumbered ID, etc.), the
+      // match failed outright with no fallback to the name check at all —
+      // exactly the kind of gap that would make this work for whichever
+      // claim was used to originally test it and fail for everyone else.
+      const empIdMatch = !!(myEmpId && aEmpId && aEmpId === myEmpId);
+      const nameMatch  = !!(myName && aName && aName === myName);
+      return empIdMatch || nameMatch;
     });
   }
 
