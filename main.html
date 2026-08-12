@@ -100,6 +100,7 @@
   <div class="nav-item" id="navClaimCase" style="display:none;" onclick="showPage('complaints')">Claim Case</div>
   <div class="nav-item" id="navShopAction" onclick="showPage('shopAction')">Shop Action</div>
   <div class="nav-item" id="navVerifyClaim" onclick="showPage('verifyClaim')">Verify Claim</div>
+  <div class="nav-item" id="navSubmitAction" onclick="showPage('submitAction')">Submit Action</div>
   <div class="nav-item" id="navFollowUpClaim" onclick="showPage('followUpClaim')">Follow up Claim</div>
   <div class="nav-item active" id="navScoreboard" onclick="showPage('scoreboard')">Scoreboard</div>
   <div class="nav-item" id="navTeamGraph" onclick="showPage('teamGraph')">Team Graph</div>
@@ -873,6 +874,41 @@
     </div>
 
   </div>
+
+  <!-- SUBMIT ACTION — every claim whose Verify Claim step is fully
+       Verified (every Corrective/Preventive action OK'd) lands here.
+       One click builds an Outlook classic .eml with the claim's subject/
+       root cause/outflow plus each action's description and its
+       Verify-Claim evidence (photos embedded inline, documents attached),
+       ready to send to the customer. See submitActionEmail(). -->
+  <div id="pagSubmitAction" class="page-body" style="display:none;">
+    <div class="form-card" style="padding: 24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+        <h3 class="form-section-title" style="margin:0; border:none; padding:0;">Claims Ready to Submit</h3>
+        <button class="btn" style="width:auto; padding:8px 16px; font-size:13px; background:var(--surface-2); color:var(--charcoal);" onclick="fetchSubmitActionQueue()">↻ Refresh Data</button>
+      </div>
+      <div class="claims-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Claim No.</th>
+              <th>Subject</th>
+              <th>Shop</th>
+              <th>Verified On</th>
+              <th>Corrective</th>
+              <th>Preventive</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="submitActionQueueBody">
+            <tr><td colspan="8" style="text-align:center; padding:40px; color:var(--charcoal-soft);">Loading claims...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <div id="pagFollowUpClaim" class="page-body" style="display:none;"><div style="padding:40px;text-align:center;color:var(--charcoal-soft);"><div style="font-size:32px;margin-bottom:12px;">📋</div><h2 style="color:var(--charcoal);">Follow up Claim</h2><p>This interface is under development.</p></div></div>
 
   <!-- ═══════════════════════ SCOREBOARD ═══════════════════════ -->
@@ -1239,18 +1275,20 @@
   //   3. Chain the "regenerate claims.js" step at the end, like every other
   //      save flow, so step 2's write is actually visible next reload.
   const SAVE_EVALUATION_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/bf0625c761ce423eab7a49021b7928a2/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=pd-fHiPSTX1L7wRhxi_q62AR5yIDvPqSs7C7RJ44NqM";
-  // ── APPOINTMENT / MINUTES MEETING URL ────────────────────────────────────
-  // Fired by TWO different places, both with a small { id, ..., tabSave }
+  // ── APPOINTMENT / MINUTES MEETING / ACTION SUBMITTED URL ─────────────────
+  // Fired by THREE different places, each with a small { id, ..., tabSave }
   // payload (falls back to SAVE_INVESTIGATION_URL if left as a placeholder):
-  //   makeAppointment()       -> { id, meetingDate,       tabSave: 'appointment'    } -> MeetingDate column
-  //   submitMinutesMeeting()  -> { id, minutesMeetingDate, tabSave: 'minutesMeeting' } -> MinutesMeetingDate column (NEW)
+  //   makeAppointment()       -> { id, meetingDate,        tabSave: 'appointment'   } -> MeetingDate column
+  //   submitMinutesMeeting()  -> { id, minutesMeetingDate,  tabSave: 'minutesMeeting'} -> MinutesMeetingDate column
+  //   submitActionEmail()     -> { id, actionSubmittedDate, tabSave: 'actionSubmit'  } -> ActionSubmittedDate column (NEW)
   // Evaluate subject 5 (evalNotifySpeed)'s Team Leader branch gates on
-  // minutesMeetingDate now, NOT meetingDate (revised per request — see
-  // computeNotifyShopScore()). MinutesMeetingDate needs (a) a matching
-  // SharePoint column, and (b) that column added to whatever "Select"
-  // action builds claims.js — skipping (b) is exactly what made the OLD
-  // meetingDate gate read "missing" even after a real save, so don't repeat
-  // that here.
+  // minutesMeetingDate, NOT meetingDate (revised per request — see
+  // computeNotifyShopScore()). Every one of these single-field columns
+  // needs (a) a matching SharePoint column, and (b) that column added to
+  // whatever "Select" action builds claims.js — skipping (b) is exactly
+  // what made the OLD meetingDate gate (and later the Verify Claim row
+  // highlight) read "missing"/"never happened" even after a real save, so
+  // don't repeat that here for ActionSubmittedDate either.
   const SEND_APPOINTMENT_URL    = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/09/workflows/6f54d1eaac304cc7a07b06bfbacb4afb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=-OjO9tNatXGt_oCEQ-wJHZUBJKMdk0Vyp6jawH-1zvw";
   // ── CLAIM MONITOR "Edit Details" URL ────────────────────────────────────
   // Fired by saveClaimEdit() when the Claim Monitor pane's "✏️ Edit Details"
@@ -2659,7 +2697,7 @@
     const _sec = (profile.section||'').trim();
     if (_sec==='SE') { const el=document.getElementById('navInquiryClaim'); if(el) el.style.display='flex'; }
     if (['EV','SE','IN'].includes(_sec)) { const el=document.getElementById('navClaimCase'); if(el) el.style.display='flex'; }
-    ['navShopAction','navVerifyClaim','navFollowUpClaim','navScoreboard','navTeamGraph'].forEach(function(id){ const el=document.getElementById(id); if(el) el.style.display='flex'; });
+    ['navShopAction','navVerifyClaim','navSubmitAction','navFollowUpClaim','navScoreboard','navTeamGraph'].forEach(function(id){ const el=document.getElementById(id); if(el) el.style.display='flex'; });
     loadPartsDatabase();
     loadUsersDatabase();
     loadEvaluatesDatabase();
@@ -2700,7 +2738,7 @@
   }
 
   /* ── PAGE ROUTING ── */
-  const pages  = { profile:'pagProfile', issueClaim:'pagIssueClaim', complaints:'pagComplaints', analytics:'pagAnalytics', investigation:'pagInvestigation', inquiryClaim:'pagInquiryClaim', shopAction:'pagShopAction', verifyClaim:'pagVerifyClaim', followUpClaim:'pagFollowUpClaim', scoreboard:'pagScoreboard', teamGraph:'pagTeamGraph' };
+  const pages  = { profile:'pagProfile', issueClaim:'pagIssueClaim', complaints:'pagComplaints', analytics:'pagAnalytics', investigation:'pagInvestigation', inquiryClaim:'pagInquiryClaim', shopAction:'pagShopAction', verifyClaim:'pagVerifyClaim', submitAction:'pagSubmitAction', followUpClaim:'pagFollowUpClaim', scoreboard:'pagScoreboard', teamGraph:'pagTeamGraph' };
   const titles = {
     profile:      ['My Profile',               'View and manage your account information'],
     issueClaim:   ['Step 1: Issuing Claim Case','Initiate a new quality control investigation'],
@@ -2708,6 +2746,7 @@
     analytics:    ['Analytics',                 'Quality metrics and team performance data'],
     investigation:['Step 2: QC Investigation',  'Analyze root cause and define corrective actions'],
     verifyClaim:  ['Verify Claim',               'Confirm corrective/preventive actions were completed by the shop'],
+    submitAction: ['Submit Action',              'Email verified corrective/preventive action evidence to the customer'],
     scoreboard:   ['Scoreboard',                'Response time and performance scoring, week by week'],
     teamGraph:    ['Team Graph',                'Total Point vs Target Point, visualized by period']
   };
@@ -2750,6 +2789,7 @@
     // again, not the single claim last viewed. closeVerifyWorkspace()
     // already does exactly this (hide workspace, show queue, refresh).
     if (key === 'verifyClaim') closeVerifyWorkspace();
+    if (key === 'submitAction') fetchSubmitActionQueue();
     if (key === 'scoreboard') renderScoreboard();
     if (key === 'teamGraph') renderTeamGraph();
     if (!skipHistory) history.pushState({ page: key }, '', '#' + key);
@@ -3569,17 +3609,23 @@
     await saveInvestigation();
   }
   /* ── ⑤ submitMinutesMeeting ─────────────────────────────────────────── */
-  /** Fetches an image URL and returns its MIME parts for embedding inline
-   *  in an .eml via Content-ID (cid:). Outlook (and most mail clients)
-   *  treat a remote-hosted <img src="https://..."> as "external content"
-   *  and block it from auto-loading (the "Right-click... to download
-   *  pictures" banner) — even for a trusted internal SharePoint link —
-   *  because the image has to be fetched live from the internet every
-   *  time the message is opened. Embedding the actual image bytes as a
-   *  cid: attachment instead makes it part of the message itself, so
+  /** Fetches ANY file URL (image, PDF, Excel, ...) and returns its MIME
+   *  parts, base64-encoded, ready to drop into an .eml either as an inline
+   *  Content-ID (cid:) part or as a regular attachment — the caller
+   *  decides which by how it uses the returned {cid, mimeType, base64,
+   *  filename} (see submitActionEmail() for the attachment case). Despite
+   *  the name, it's not image-specific: it's just fetch+blob+base64, so
+   *  any file type round-trips fine. Originally written so
+   *  submitMinutesMeeting() could embed Claim Photos inline — Outlook (and
+   *  most mail clients) treat a remote-hosted <img src="https://..."> as
+   *  "external content" and block it from auto-loading (the "Right-click...
+   *  to download pictures" banner) — even for a trusted internal
+   *  SharePoint link — because the image has to be fetched live from the
+   *  internet every time the message is opened. Embedding the actual bytes
+   *  as a cid: part instead makes it part of the message itself, so
    *  there's nothing left for Outlook to block; the photo just shows.
    *  Returns null if the fetch fails (CORS, auth, offline, etc.) so the
-   *  caller can fall back to the original remote link. */
+   *  caller can fall back to a plain remote link. */
   async function _fetchImageAsEmailPart(url, cid) {
     try {
       const res = await fetch(url);
@@ -7304,6 +7350,30 @@
     return nums;
   }
 
+  /** Same idea as _extractTaggedBlockNumbers(), but groups the actual URLs
+   *  by block number instead of just collecting which numbers exist — e.g.
+   *  { 1: ["https://.../VerifyCorrective1_a.jpg", ...], 2: [...] }. Used by
+   *  submitActionEmail() to pull each action's own Verify Claim evidence
+   *  (photos/documents) for the customer-facing email. */
+  function _extractTaggedBlockUrls(rawUrls, tagRegex) {
+    let urls = [];
+    if (Array.isArray(rawUrls)) urls = rawUrls.filter(Boolean);
+    else if (typeof rawUrls === 'string' && rawUrls.trim()) {
+      try { urls = JSON.parse(rawUrls).filter(Boolean); }
+      catch (_) { urls = rawUrls.split(',').map(s => s.trim()).filter(Boolean); }
+    }
+    const byNum = {};
+    urls.forEach(url => {
+      const filename = decodeURIComponent((String(url).split('/').pop() || '').split('?')[0]);
+      const m = filename.match(tagRegex);
+      if (!m) return;
+      const num = parseInt(m[1], 10);
+      if (!byNum[num]) byNum[num] = [];
+      byNum[num].push(url);
+    });
+    return byNum;
+  }
+
   /* ── BRIDGE / OPEN INVESTIGATION ── */
   let activeClaimsList = []; let selectedClaimId = null; let selectedClaimData = null;
 
@@ -8773,6 +8843,304 @@
     document.getElementById('verifyWorkspaceView').style.display = 'none';
     document.getElementById('verifyQueueView').style.display = 'block';
     fetchVerifyQueue(); // pick up anything that changed while the workspace was open
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     SUBMIT ACTION — one step past Verify Claim. Once every Corrective/
+     Preventive action on a claim has been verified OK (VerifyStatus ===
+     'Verified' — same definition as the VERIFIED badge in the Verify
+     Claim queue), it lands here. One click builds an Outlook classic
+     .eml containing the claim's subject/root cause/outflow plus each
+     action's own description and its Verify Claim evidence (photos
+     embedded inline, documents attached) — ready to send to the
+     customer as proof the actions were actually completed.
+
+     `actionSubmittedDate`: string — ISO timestamp, stamped the moment the
+     .eml is generated (fire-and-forget, reused from SEND_APPOINTMENT_URL
+     the same way minutesMeetingDate is — see that const's comment — with
+     tabSave: 'actionSubmit'). NEW column, same single-field pattern as
+     minutesMeetingDate — add a matching ActionSubmittedDate column and a
+     mapping in the "Select" action that builds claims.js, or this will
+     read back as never-submitted even after a real send (the same class
+     of bug meetingDate/the row highlight both already hit). Purely a
+     "has this been sent at least once" marker — resending (the button
+     just relabels to "🔁 Resend to Customer") overwrites it with the
+     latest send time, it's not a history log.
+     ═══════════════════════════════════════════════════════════════════════ */
+  let submitActionQueueList = []; // last-fetched queue — mutated in place after a send so the row's badge updates without a full refetch
+
+  function _getActionSubmittedDate(claim) {
+    return resolveField(claim || {}, ['actionSubmittedDate', 'ActionSubmittedDate', 'Actionsubmitteddate'], '');
+  }
+
+  /** Loads claims.js fresh and lists every claim whose Verify Claim step is
+   *  fully Verified — same VerifyStatus/isComplete definition getVerifyRowModel()
+   *  already computes for the VERIFIED badge, reused here via
+   *  getVerifyRowModel() itself rather than re-deriving it a second way. */
+  function fetchSubmitActionQueue() {
+    const tbody = document.getElementById('submitActionQueueBody');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;">Loading claims ready to submit...</td></tr>';
+
+    loadDataScript('claims.js', ['ACTIVE_CLAIMS_DATABASE']).then((result) => {
+      if (!Array.isArray(result.ACTIVE_CLAIMS_DATABASE)) throw new Error('ACTIVE_CLAIMS_DATABASE not found in claims.js');
+      window.ACTIVE_CLAIMS_DATABASE = result.ACTIVE_CLAIMS_DATABASE;
+      activeClaimsList = result.ACTIVE_CLAIMS_DATABASE;
+
+      submitActionQueueList = activeClaimsList
+        .map((c, i) => getVerifyRowModel(c, i))
+        .filter(r => r.isComplete);
+
+      renderSubmitActionTable();
+    }).catch((e) => {
+      console.error('[fetchSubmitActionQueue] Failed to load claims.js:', e);
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:red;">Error loading claims.js</td></tr>';
+    });
+  }
+
+  function renderSubmitActionTable() {
+    const tbody = document.getElementById('submitActionQueueBody');
+    if (!tbody) return;
+
+    if (!submitActionQueueList.length) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--charcoal-soft);">No claims are fully verified yet — they\'ll appear here once every action is OK\'d in Verify Claim.</td></tr>';
+      return;
+    }
+
+    // Newest claim first, same convention as the other queues.
+    const rows = submitActionQueueList.slice().sort((a, b) => {
+      const an = Number(a.runNo), bn = Number(b.runNo);
+      return (isNaN(an) || isNaN(bn)) ? String(b.runNo).localeCompare(String(a.runNo)) : bn - an;
+    });
+
+    tbody.innerHTML = '';
+    rows.forEach(r => {
+      const submittedRaw = _getActionSubmittedDate(r.claim);
+      const statusHtml = submittedRaw
+        ? `<span class="status-badge status-verified">✅ Sent ${formatDateDisplay(submittedRaw)}</span>`
+        : `<span class="status-badge" style="background:#fff3cd;color:#8a6d1e;border:1px solid #f0d896;">⏳ Ready to Submit</span>`;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="font-weight:800;color:var(--red);white-space:nowrap;font-size:12px;">${r.claimNo}</td>
+        <td style="font-weight:700;">${r.subject}</td>
+        <td style="font-size:11px;">${r.shop}</td>
+        <td style="font-size:11px;white-space:nowrap;">${r.closeDateDisplay}</td>
+        <td style="font-size:11px;text-align:center;">${r.correctiveCount || '—'}</td>
+        <td style="font-size:11px;text-align:center;">${r.preventiveCount || '—'}</td>
+        <td>${statusHtml}</td>
+        <td></td>
+      `;
+      const actionTd = tr.lastElementChild;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'action-btn';
+      btn.style.cssText = 'background:var(--red); color:#fff;';
+      btn.innerHTML = submittedRaw ? '🔁 Resend to Customer' : '📧 Submit Action';
+      btn.onclick = (ev) => { ev.stopPropagation(); submitActionEmail(r.claim, btn); };
+      actionTd.appendChild(btn);
+      tbody.appendChild(tr);
+    });
+  }
+
+  /** Builds an Outlook classic .eml — claim subject/root cause/outflow,
+   *  then each Corrective/Preventive action's own description plus its
+   *  Verify Claim evidence: photos embedded inline (cid:, same technique
+   *  submitMinutesMeeting() uses so Outlook doesn't block them as remote
+   *  content) and documents as REAL attachments (not just links — these
+   *  are the customer's proof, so the actual file should be in the
+   *  message). No customer email/contact field exists anywhere in this
+   *  app's data model, so To: is left blank on purpose — fill it in on
+   *  the Outlook draft before sending, same as any other .eml this app
+   *  generates that has no reliable recipient to prefill. */
+  async function submitActionEmail(claim, btn) {
+    const cd = claim || {};
+    const runNo = cd.index_running_no || cd.IndexRunningNo || cd.index || cd.Index || 1;
+    const claimNo = buildClaimNo(runNo, resolveField(cd, ['issueDate', 'IssueDate'], ''));
+    const subject = resolveField(cd, ['Subject', 'subject', 'title', 'Title'], 'N/A');
+    const rootCause = resolveField(cd, ['rootCauseAnalysis', 'RootCauseAnalysis', 'troubleAnalysis', 'TroubleAnalysis'], 'N/A');
+    const outflow = resolveField(cd, ['outflowAnalysis', 'OutflowAnalysis', 'outFlow'], 'N/A');
+    let shopVal = '—';
+    const _shopRaw = cd.shopConcerned || cd.ShopConcerned || cd.ClaimShop || cd.claimShop || '';
+    try {
+      const sc = JSON.parse(_shopRaw);
+      if (Array.isArray(sc) && sc.length > 0) shopVal = sc.join(', ');
+      else if (typeof sc === 'string' && sc.trim()) shopVal = sc.trim();
+    } catch (_) { if (_shopRaw && _shopRaw.trim()) shopVal = _shopRaw.trim(); }
+
+    if (btn) { btn.dataset.origText = btn.innerHTML; btn.disabled = true; btn.innerHTML = '📎 Building email...'; }
+
+    try {
+      const apText = resolveField(cd, ['actionPlan', 'ActionPlan', 'action_plan'], '');
+      const verifDataRaw = resolveField(cd, ['verificationData', 'VerificationData'], '');
+      const verifyState = _extractVerificationByBlock(verifDataRaw);
+      const verifyImgRaw = cd.verificationImages || cd.VerificationImages || '';
+      const verifyDocRaw = cd.verificationDocuments || cd.VerificationDocuments || '';
+      const imgByNum = { Corrective: _extractTaggedBlockUrls(verifyImgRaw, /VerifyCorrective(\d+)_/i), Preventive: _extractTaggedBlockUrls(verifyImgRaw, /VerifyPreventive(\d+)_/i) };
+      const docByNum = { Corrective: _extractTaggedBlockUrls(verifyDocRaw, /VerifyCorrectiveDoc(\d+)_/i), Preventive: _extractTaggedBlockUrls(verifyDocRaw, /VerifyPreventiveDoc(\d+)_/i) };
+
+      const embeddedPhotoParts = [];
+      const attachmentParts = [];
+      let cidSeq = 0;
+
+      // Builds one action's HTML block (description + verified date + its
+      // own evidence photos/docs) and pushes matching MIME parts as a
+      // side effect — mirrors submitMinutesMeeting()'s actHtml, extended
+      // with the evidence this step is actually about.
+      async function actionBlockHtml(type, byBlock) {
+        const nums = Object.keys(byBlock).map(Number).sort((a, b) => a - b);
+        if (!nums.length) return '';
+        const items = await Promise.all(nums.map(async (num) => {
+          const entry = byBlock[num] || {};
+          const key = `${type}_${num}`;
+          const state = verifyState[key] || {};
+          const verifiedTsRaw = _getVerificationTimestamps(cd)[key];
+          const verifiedLine = (state.result && verifiedTsRaw)
+            ? `<div style="color:#1a7a3d;font-weight:700;margin-top:3px;">✔ Verified ${state.result} — ${_formatLogTimestamp(new Date(verifiedTsRaw))}</div>`
+            : '';
+          const photoUrls = (imgByNum[type] && imgByNum[type][num]) || [];
+          const docUrls = (docByNum[type] && docByNum[type][num]) || [];
+
+          const photoTags = await Promise.all(photoUrls.map(async (u) => {
+            cidSeq++;
+            const cid = 'actEvid' + cidSeq + '_' + Date.now();
+            const part = await _fetchImageAsEmailPart(u, cid);
+            if (part) { embeddedPhotoParts.push(part); return `<img src="cid:${cid}" style="max-width:320px;max-height:240px;object-fit:contain;display:inline-block;margin:4px;border:1px solid #ddd;border-radius:4px;">`; }
+            return `<img src="${u}" style="max-width:320px;max-height:240px;object-fit:contain;display:inline-block;margin:4px;border:1px solid #ddd;border-radius:4px;" onerror="this.style.display='none'">`;
+          }));
+          const photoHtml = photoTags.length ? `<div style="margin-top:6px;">${photoTags.join('')}</div>` : '';
+
+          const docChips = [];
+          for (const u of docUrls) {
+            const fn = decodeURIComponent((String(u).split('/').pop() || 'Document').split('?')[0]).replace(/^Verify(?:Corrective|Preventive)Doc\d+_/i, '');
+            const part = await _fetchImageAsEmailPart(u, '');
+            if (part) { attachmentParts.push({ ...part, filename: fn }); docChips.push(`📄 ${fn} (attached)`); }
+            else docChips.push(`<a href="${u}" style="color:#0066cc;">📄 ${fn}</a>`);
+          }
+          const docHtml = docChips.length ? `<div style="margin-top:6px;font-size:12px;">${docChips.join('<br>')}</div>` : '';
+
+          return `<div style="margin-bottom:10px;padding:8px;background:#fafafa;border-radius:4px;font-size:12px;">
+              <div><b>${type} Action ${num}.</b> ${escapeHtml(entry.text || '(no description recorded)')}</div>
+              ${verifiedLine}${photoHtml}${docHtml}
+            </div>`;
+        }));
+        return `<tr><td colspan="2" style="padding:10px 14px;border-bottom:1px solid #f0f0f0;">
+            <div style="font-weight:700;color:#DA0037;font-size:12px;margin-bottom:6px;">→ ${type} Actions</div>
+            ${items.join('')}
+          </td></tr>`;
+      }
+
+      const correctiveByBlock = _extractActionTextByBlock(apText, 'Corrective');
+      const preventiveByBlock = _extractActionTextByBlock(apText, 'Preventive');
+      const correctiveHtml = await actionBlockHtml('Corrective', correctiveByBlock);
+      const preventiveHtml = await actionBlockHtml('Preventive', preventiveByBlock);
+
+      const row = (label, val) => `<tr><td style="padding:6px 14px;background:#fafafa;color:#888;font-size:12px;white-space:nowrap;width:140px;border-bottom:1px solid #f0f0f0;">${label}</td><td style="padding:6px 14px;font-size:13px;border-bottom:1px solid #f0f0f0;">${val || 'N/A'}</td></tr>`;
+
+      const bodyHtml = '<html><head><meta charset="UTF-8"></head><body>'
+        + '<div style="font-family:Arial,sans-serif;color:#222;max-width:660px;">'
+        + '<div style="background:#DA0037;color:#fff;padding:16px 20px;border-radius:8px 8px 0 0;">'
+        + '<div style="font-size:11px;letter-spacing:1px;opacity:0.8;text-transform:uppercase;">Smart QC — Action Completion Evidence</div>'
+        + '<div style="font-size:17px;font-weight:700;margin-top:5px;">' + escapeHtml(subject) + '</div>'
+        + '<div style="font-size:12px;margin-top:4px;opacity:0.9;">' + claimNo + ' &nbsp;·&nbsp; Shop(s): <strong>' + escapeHtml(shopVal) + '</strong></div>'
+        + '</div>'
+        + '<table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #e8e8e8;border-top:none;">'
+        + row('Claim No.', claimNo)
+        + row('Subject / Title', escapeHtml(subject))
+        + '<tr><td style="padding:6px 14px;background:#fafafa;color:#888;font-size:12px;vertical-align:top;border-bottom:1px solid #f0f0f0;">Root Cause</td>'
+        + '<td style="padding:6px 14px;font-size:13px;border-bottom:1px solid #f0f0f0;white-space:pre-wrap;">' + escapeHtml(rootCause) + '</td></tr>'
+        + '<tr><td style="padding:6px 14px;background:#fafafa;color:#888;font-size:12px;vertical-align:top;border-bottom:1px solid #f0f0f0;">Outflow</td>'
+        + '<td style="padding:6px 14px;font-size:13px;border-bottom:1px solid #f0f0f0;white-space:pre-wrap;">' + escapeHtml(outflow) + '</td></tr>'
+        + correctiveHtml
+        + preventiveHtml
+        + '</table>'
+        + '<div style="background:#fff8e6;border:1px solid #f0d060;border-top:none;padding:10px 16px;border-radius:0 0 8px 8px;font-size:11px;color:#7a6000;text-align:center;">'
+        + 'Smart QC System — Action Completion Evidence (all actions verified OK)'
+        + '</div></div></body></html>';
+
+      const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
+      const db = (typeof USER_DATABASE !== 'undefined' && Array.isArray(USER_DATABASE)) ? USER_DATABASE : [];
+      const orgUser = db.find(u => u.empId === profile.empId) || {};
+      const orgEmail = (orgUser.email || '').trim();
+      const fromName = ((profile.firstName || '') + ' ' + (profile.lastName || '')).trim();
+      const emailSubject = '[QC Action Completed] ' + subject + ' — ' + claimNo;
+      // To: intentionally blank — see this function's doc comment.
+      const headerLines = 'From: ' + fromName + (orgEmail ? ' <' + orgEmail + '>' : '') + '\r\n'
+        + 'To: \r\n'
+        + 'Subject: ' + emailSubject + '\r\n'
+        + 'Date: ' + new Date().toUTCString() + '\r\n'
+        + 'MIME-Version: 1.0\r\n'
+        + 'X-Unsent: 1\r\n';
+
+      // multipart/mixed (this level) holds the real document attachments;
+      // its first part is a nested multipart/related holding the HTML
+      // body + inline cid: photos — the standard MIME shape for "message
+      // with both inline images and separate attachments".
+      const relatedBoundary = 'SmartQC_rel_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      const relatedParts = embeddedPhotoParts.map(p =>
+        '--' + relatedBoundary + '\r\n'
+        + 'Content-Type: ' + p.mimeType + '; name="' + p.filename + '"\r\n'
+        + 'Content-Transfer-Encoding: base64\r\n'
+        + 'Content-ID: <' + p.cid + '>\r\n'
+        + 'Content-Disposition: inline; filename="' + p.filename + '"\r\n\r\n'
+        + _wrapBase64(p.base64) + '\r\n'
+      ).join('');
+      const relatedMime = 'Content-Type: multipart/related; boundary="' + relatedBoundary + '"\r\n\r\n'
+        + '--' + relatedBoundary + '\r\n'
+        + 'Content-Type: text/html; charset=UTF-8\r\n\r\n'
+        + bodyHtml + '\r\n'
+        + relatedParts
+        + '--' + relatedBoundary + '--\r\n';
+
+      let eml;
+      if (attachmentParts.length > 0) {
+        const mixedBoundary = 'SmartQC_mix_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        const attachMime = attachmentParts.map(p =>
+          '--' + mixedBoundary + '\r\n'
+          + 'Content-Type: ' + p.mimeType + '; name="' + p.filename + '"\r\n'
+          + 'Content-Transfer-Encoding: base64\r\n'
+          + 'Content-Disposition: attachment; filename="' + p.filename + '"\r\n\r\n'
+          + _wrapBase64(p.base64) + '\r\n'
+        ).join('');
+        eml = headerLines
+          + 'Content-Type: multipart/mixed; boundary="' + mixedBoundary + '"\r\n\r\n'
+          + '--' + mixedBoundary + '\r\n'
+          + relatedMime
+          + '--' + mixedBoundary + '\r\n'
+          + attachMime
+          + '--' + mixedBoundary + '--\r\n';
+      } else {
+        eml = headerLines + relatedMime;
+      }
+
+      const safeSubj = subject.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
+      const blob = new Blob([eml], { type: 'message/rfc822' });
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl; a.download = 'QC_ActionEvidence_' + safeSubj + '.eml';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+
+      // Record actionSubmittedDate — fire-and-forget, same pattern as
+      // makeAppointment()/submitMinutesMeeting() (see this section's
+      // top comment). Updates the row in place so the queue's badge/
+      // button flip to "Sent"/"Resend" without a full refetch.
+      const nowIso = new Date().toISOString();
+      cd.actionSubmittedDate = nowIso;
+      renderSubmitActionTable();
+      const suUrl = (typeof SEND_APPOINTMENT_URL !== 'undefined' && !SEND_APPOINTMENT_URL.startsWith('PASTE_')) ? SEND_APPOINTMENT_URL : SAVE_INVESTIGATION_URL;
+      fetch(suUrl, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: String(cd.id || cd.ID || ''), actionSubmittedDate: nowIso, tabSave: 'actionSubmit' })
+      }).catch(e => console.log('submitActionEmail actionSubmittedDate save (CORS suppressed):', e));
+
+      setTimeout(() => alert('📧 Action evidence email ready!\nClick the .eml file in your download bar to open in Outlook Classic — add the customer\'s email address before sending.'), 500);
+    } catch (e) {
+      console.error('[submitActionEmail] failed:', e);
+      alert('Could not build the action evidence email — see console for details.');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.origText || btn.innerHTML; }
+    }
   }
 
   function openVerifyWorkspace(claim) {
