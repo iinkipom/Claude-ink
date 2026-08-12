@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart QC — Dashboard</title>
+  <title>Q-FLOW — Dashboard</title>
   <link rel="stylesheet" href="styles.css">
   
   <style>
@@ -3376,7 +3376,7 @@
 
       // End marker — prevents Teams text from joining the last URL
       bodyLines.push(sep);
-      bodyLines.push('  — Smart QC System —');
+      bodyLines.push('  — Q-FLOW System —');
 
       const body = bodyLines.join('\n');
 
@@ -3413,7 +3413,7 @@
       // ── Build .ics ─────────────────────────────────────────────────────
       var ics = 'BEGIN:VCALENDAR\r\n'
         + 'VERSION:2.0\r\n'
-        + 'PRODID:-//SmartQC//SmartQC//EN\r\n'
+        + 'PRODID:-//Q-FLOW//Q-FLOW//EN\r\n'
         + 'CALSCALE:GREGORIAN\r\n'
         + 'METHOD:PUBLISH\r\n'
         + 'BEGIN:VEVENT\r\n'
@@ -3755,7 +3755,7 @@
     const bodyHtml = '<html><head><meta charset="UTF-8"></head><body>'
       + '<div style="font-family:Arial,sans-serif;color:#222;max-width:660px;">'
       + '<div style="background:#DA0037;color:#fff;padding:16px 20px;border-radius:8px 8px 0 0;">'
-      + '<div style="font-size:11px;letter-spacing:1px;opacity:0.8;text-transform:uppercase;">Smart QC — Minutes Meeting</div>'
+      + '<div style="font-size:11px;letter-spacing:1px;opacity:0.8;text-transform:uppercase;">Q-FLOW — Minutes Meeting</div>'
       + '<div style="font-size:17px;font-weight:700;margin-top:5px;">' + resolveField(cd, ['Subject','subject'], '—') + '</div>'
       + '<div style="font-size:12px;margin-top:4px;opacity:0.9;">' + claimNo + ' &nbsp;·&nbsp; Shop(s): <strong>' + shopConcernedStr + '</strong></div>'
       + '</div>'
@@ -3792,7 +3792,7 @@
       + actHtml(preventive, '→ Preventive Actions')
       + '</table>'
       + '<div style="background:#fff8e6;border:1px solid #f0d060;border-top:none;padding:10px 16px;border-radius:0 0 8px 8px;font-size:11px;color:#7a6000;text-align:center;">'
-      + 'Smart QC System — Minutes Meeting Document'
+      + 'Q-FLOW System — Minutes Meeting Document'
       + '</div></div></body></html>';
     // Build .eml
     const orgUser  = db.find(function(u) { return u.empId === profile.empId; }) || {};
@@ -3811,7 +3811,7 @@
       // resolve against the Content-ID of each part below — the photos
       // are literally part of the message, not fetched remotely, so
       // Outlook has nothing to block.
-      const boundary = 'SmartQC_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      const boundary = 'QFLOW_' + Date.now() + '_' + Math.random().toString(36).slice(2);
       const relatedParts = embeddedPhotoParts.map(function(p) {
         return '--' + boundary + '\r\n'
           + 'Content-Type: ' + p.mimeType + '; name="' + p.filename + '"\r\n'
@@ -9040,7 +9040,7 @@
       const bodyHtml = '<html><head><meta charset="UTF-8"></head><body>'
         + '<div style="font-family:Arial,sans-serif;color:#222;max-width:660px;">'
         + '<div style="background:#DA0037;color:#fff;padding:16px 20px;border-radius:8px 8px 0 0;">'
-        + '<div style="font-size:11px;letter-spacing:1px;opacity:0.8;text-transform:uppercase;">Smart QC — Action Completion Evidence</div>'
+        + '<div style="font-size:11px;letter-spacing:1px;opacity:0.8;text-transform:uppercase;">Q-FLOW — Action Completion Evidence</div>'
         + '<div style="font-size:17px;font-weight:700;margin-top:5px;">' + escapeHtml(subject) + '</div>'
         + '<div style="font-size:12px;margin-top:4px;opacity:0.9;">' + claimNo + ' &nbsp;·&nbsp; Shop(s): <strong>' + escapeHtml(shopVal) + '</strong></div>'
         + '</div>'
@@ -9055,7 +9055,7 @@
         + preventiveHtml
         + '</table>'
         + '<div style="background:#fff8e6;border:1px solid #f0d060;border-top:none;padding:10px 16px;border-radius:0 0 8px 8px;font-size:11px;color:#7a6000;text-align:center;">'
-        + 'Smart QC System — Action Completion Evidence (all actions verified OK)'
+        + 'Q-FLOW System — Action Completion Evidence (all actions verified OK)'
         + '</div></div></body></html>';
 
       const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
@@ -9076,7 +9076,7 @@
       // its first part is a nested multipart/related holding the HTML
       // body + inline cid: photos — the standard MIME shape for "message
       // with both inline images and separate attachments".
-      const relatedBoundary = 'SmartQC_rel_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      const relatedBoundary = 'QFLOW_rel_' + Date.now() + '_' + Math.random().toString(36).slice(2);
       const relatedParts = embeddedPhotoParts.map(p =>
         '--' + relatedBoundary + '\r\n'
         + 'Content-Type: ' + p.mimeType + '; name="' + p.filename + '"\r\n'
@@ -9094,7 +9094,7 @@
 
       let eml;
       if (attachmentParts.length > 0) {
-        const mixedBoundary = 'SmartQC_mix_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        const mixedBoundary = 'QFLOW_mix_' + Date.now() + '_' + Math.random().toString(36).slice(2);
         const attachMime = attachmentParts.map(p =>
           '--' + mixedBoundary + '\r\n'
           + 'Content-Type: ' + p.mimeType + '; name="' + p.filename + '"\r\n'
