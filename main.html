@@ -1256,6 +1256,32 @@
 
 <script>
   /* ── CONFIGURATION ── */
+  // CLAIM_SUBMIT_URL — fired once by submitClaim() when Step 1 is
+  // submitted, with the full claimData object as its JSON body (subject,
+  // source, typeTrouble, typeAir, market, country, distributorName,
+  // customerCode, distributorShortName, mainDefect, defectDetail,
+  // codeDefect, modelName, serialNumbers, partName, partNo, ...).
+  //
+  // Defect Category fields (added per request — "recorded into Microsoft
+  // List"): the client already sends these three on every submit, sourced
+  // from defects.js/loadDefectDatabase() (see that section's comment) —
+  //   mainDefect:   string — MainDefectMaster's main_defect_en (display
+  //                 text, not the raw id, chosen for the same "store the
+  //                 human-readable value" reason distributorName is stored
+  //                 as text rather than a raw key)
+  //   defectDetail: string — SubDefectMaster's sub_defect_detail_clean
+  //   codeDefect:   string — SubDefectMaster's own code (column A)
+  // For these to actually land in Microsoft List, the "Create item"
+  // action in this flow needs THREE new columns mapped to THREE new
+  // SharePoint columns (e.g. MainDefect / DefectDetail / CodeDefect,
+  // Single line of text each) — the client-side half of this is already
+  // done and cannot make the List record them on its own; that mapping
+  // has to be added in Power Automate itself. AND, separately, those same
+  // three columns need to be added to whatever "Select" action builds
+  // claims.js if this app should ever read them back (Claim Monitor,
+  // Investigation, reports, ...) — skipping that step is exactly what
+  // causes the "saved fine, reads back missing" class of bug this app has
+  // hit repeatedly (meetingDate, the Verify Claim row highlight, ...).
   const CLAIM_SUBMIT_URL    = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/2ec9a8be48184c1d879cf92732f3931e/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=P8_UCocRwFhbHJPNYl1bDliQTgpta6CJ_QcB6ddfw9s";
   const SAVE_INVESTIGATION_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/b3ef405d3d6a46dba91ab63eaf98bb71/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=9IiYnbL80DtRGn6C-tsPeOl1G38ImgmwuQV2GRPnh1Y";
   const SAVE_FINDING_RISK_URL  = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/aa0cd16f30094734aafb0a03823597e1/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=5gh7GRMm45XHHAMfELhzqRYVajc8fg8tjCmb93w--Os";
