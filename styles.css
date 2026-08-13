@@ -364,37 +364,48 @@ body.sidebar-collapsed .sidebar-edge-toggle { left: 0; }
   padding: 6px 8px; margin-bottom: 30px;
   position: relative; z-index: 1;
 }
-/* Q Flow logomark — same concept as index.html's login-page logo (Q ring +
-   checkmark + arrow tail, rotating ambient glow), scaled down for the
-   sidebar. index.html uses Tailwind's arbitrary-value utilities for this;
-   main.html has no Tailwind, so the same visuals are recreated here as
-   plain CSS instead. */
-.sidebar-logo-icon {
-  position: relative;
-  width: 34px; height: 34px;
-  border-radius: 9px;
-  background: linear-gradient(160deg, var(--red) 0%, #6b0018 100%);
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 14px rgba(218,0,55,0.4);
-  flex-shrink: 0;
-  overflow: hidden;
+/* Q-FLOW brand mark — matches the supplied logo artwork (blue-to-magenta
+   "Q" ring, diagonal pill tail, flame merging into the ring's top-right
+   gap). Drawn as inline SVG directly in the HTML (see the sidebar-logo
+   markup) rather than as a CSS background box like the old logomark, so
+   only the flame animation below lives here. index.html's login-page logo
+   uses the exact same SVG shapes/gradients, just scaled up. */
+.sidebar-logo-icon-svg { flex-shrink: 0; filter: drop-shadow(0 4px 10px rgba(47,107,255,0.35)); }
+
+/* Flame flicker — subtle scale/rotate wobble around the flame's base,
+   looping continuously, plus a pulsing blurred glow layer underneath and
+   three small embers drifting up and fading out on staggered delays.
+   transform-origin sits at the flame's base (where it merges into the
+   ring) so the tip is what visibly sways, like a real flame. */
+.qflow-flame-wrap {
+  transform-origin: 68% 78%;
+  animation: qflowFlameFlicker 2.2s ease-in-out infinite;
 }
-.sidebar-logo-icon-glow {
-  position: absolute;
-  width: 150%; height: 150%;
-  background: conic-gradient(from 0deg, transparent 0 280deg, rgba(255,255,255,0.4) 360deg);
-  animation: sidebarLogoSpin 4s linear infinite;
-  opacity: 0.6;
+@keyframes qflowFlameFlicker {
+  0%   { transform: scale(1,1) rotate(0deg); }
+  20%  { transform: scale(1.04,0.96) rotate(-2deg); }
+  40%  { transform: scale(0.97,1.05) rotate(2deg); }
+  60%  { transform: scale(1.05,0.94) rotate(-1.5deg); }
+  80%  { transform: scale(0.98,1.03) rotate(1.5deg); }
+  100% { transform: scale(1,1) rotate(0deg); }
 }
-.sidebar-logo-icon-inner {
-  position: absolute; inset: 1.5px;
-  border-radius: 7px;
-  background: linear-gradient(160deg, var(--red) 0%, #6b0018 100%);
+.qflow-flame-glow { animation: qflowFlameGlowPulse 2.2s ease-in-out infinite; }
+@keyframes qflowFlameGlowPulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 0.85; }
 }
-@keyframes sidebarLogoSpin { to { transform: rotate(360deg); } }
+.qflow-ember { animation: qflowEmberRise 2.6s ease-in infinite; }
+.qflow-ember-2 { animation-delay: 0.9s; }
+.qflow-ember-3 { animation-delay: 1.7s; }
+@keyframes qflowEmberRise {
+  0%   { transform: translate(0,0) scale(1); opacity: 0; }
+  15%  { opacity: 0.9; }
+  100% { transform: translate(3px,-16px) scale(0.2); opacity: 0; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-logo-icon-glow { animation: none; }
+  .qflow-flame-wrap, .qflow-flame-glow, .qflow-ember { animation: none; }
 }
+
 .sidebar-logo-word {
   display: flex; flex-direction: column; justify-content: center;
   min-width: 0;
@@ -402,14 +413,9 @@ body.sidebar-collapsed .sidebar-edge-toggle { left: 0; }
 .sidebar-logo-word-main { display: flex; align-items: baseline; gap: 3px; line-height: 1; }
 .sidebar-logo-q {
   font-family: var(--font-display);
-  font-size: 19px; font-weight: 900;
-  background: linear-gradient(90deg, var(--red), #ff6b8e);
+  font-size: 17px; font-weight: 900; letter-spacing: 0.5px;
+  background: linear-gradient(90deg, #4b7bff, #ff2f7e);
   -webkit-background-clip: text; background-clip: text; color: transparent;
-}
-.sidebar-logo-flow {
-  font-family: var(--font-body);
-  font-size: 14px; font-weight: 800; letter-spacing: 1.5px;
-  color: var(--white);
 }
 .sidebar-logo-tagline {
   display: flex; align-items: center; gap: 5px;
@@ -418,7 +424,7 @@ body.sidebar-collapsed .sidebar-edge-toggle { left: 0; }
   margin-top: 2px;
   white-space: nowrap;
 }
-.sidebar-logo-tagline-dash { width: 10px; height: 1px; background: var(--red); flex-shrink: 0; }
+.sidebar-logo-tagline-dash { width: 10px; height: 1px; background: linear-gradient(90deg, #4b7bff, #ff2f7e); flex-shrink: 0; }
 
 .sidebar-section-label {
   font-size: 10px; color: rgba(255,255,255,0.28);
