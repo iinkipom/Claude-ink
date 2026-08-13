@@ -491,9 +491,28 @@
             </div>
             <div class="form-group">
               <label>Claim Country</label>
-              <select id="editCountry" class="form-control">
+              <select id="editCountry" class="form-control" onchange="updateEditDistributors()">
                 <option value="" disabled selected>Select market first...</option>
               </select>
+            </div>
+          </div>
+          <!-- Distributor Name -> Customer Code / Short Name — same
+               cascading + auto-fill pattern as Step 1 (see
+               updateEditDistributors()/updateEditDistributorDetails()). -->
+          <div class="form-row">
+            <div class="form-group">
+              <label>Distributor Name</label>
+              <select id="editDistributor" class="form-control" disabled onchange="updateEditDistributorDetails()">
+                <option value="" disabled selected>Please select country first...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Customer Code</label>
+              <input type="text" id="editCustomerCode" class="form-control" readonly placeholder="Auto-filled from Distributor Name">
+            </div>
+            <div class="form-group">
+              <label>Distributor Short Name</label>
+              <input type="text" id="editDistShortName" class="form-control" readonly placeholder="Auto-filled from Distributor Name">
             </div>
           </div>
           <div class="form-group">
@@ -512,13 +531,45 @@
             <input type="text" id="editSerial" class="form-control" placeholder="Serial numbers, comma separated">
           </div>
           <div class="form-row">
-            <div class="form-group">
-              <label>Part Name</label>
-              <input type="text" id="editPartName" class="form-control" placeholder="Part Name or N/A">
-            </div>
+            <!-- Part No. — same search-then-autofill widget as Step 1
+                 (see filterEditPartNoSuggestions()/selectEditPartNo()) —
+                 previously two independent plain text inputs with no link
+                 between them at all. -->
             <div class="form-group">
               <label>Part No.</label>
-              <input type="text" id="editPartNo" class="form-control" placeholder="Part No. or N/A">
+              <div style="position:relative;">
+                <div style="display:flex; gap:6px; align-items:center;">
+                  <input type="text" id="editPartNoSearch" class="form-control"
+                    placeholder="Type Part No. to search…"
+                    autocomplete="off"
+                    style="flex:1;"
+                    oninput="filterEditPartNoSuggestions(this.value)"
+                    onfocus="filterEditPartNoSuggestions(this.value)"
+                    onkeydown="handleEditPartNoKeydown(event)"
+                    onblur="setTimeout(()=>{const s=document.getElementById('editPartNoSuggestBox');if(s)s.style.display='none';},200)">
+                  <button type="button" id="editPartNoClearBtn" onclick="clearEditPartSelection()"
+                    style="display:none; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); padding:0 10px; height:38px; cursor:pointer; color:var(--red); font-size:13px; flex-shrink:0;"
+                    title="Clear selection">✕</button>
+                </div>
+                <div id="editPartNoSuggestBox"
+                  style="display:none; position:absolute; top:100%; left:0; right:0; z-index:9999;
+                         background:var(--white); border:1px solid var(--border); border-top:none;
+                         border-radius:0 0 var(--r-md) var(--r-md); max-height:220px; overflow-y:auto;
+                         box-shadow:0 4px 14px rgba(0,0,0,.13);"></div>
+              </div>
+              <input type="hidden" id="editPartNo">
+            </div>
+            <div class="form-group">
+              <label>Part Name</label>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <input type="text" id="editPartName" class="form-control"
+                  placeholder="Auto-filled after Part No. selection"
+                  readonly
+                  style="flex:1; background:var(--surface-2); cursor:default;">
+                <button type="button" id="editPartNameClearBtn" onclick="clearEditPartSelection()"
+                  style="display:none; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); padding:0 10px; height:38px; cursor:pointer; color:var(--red); font-size:13px; flex-shrink:0;"
+                  title="Clear selection">✕</button>
+              </div>
             </div>
           </div>
           <div class="form-group">
@@ -552,6 +603,28 @@
             <label>Problem Detail</label>
             <textarea id="editProbDetail" class="form-control" style="min-height:80px;"></textarea>
           </div>
+
+          <!-- Defect Category — same cascade as Step 1 (see
+               updateEditDefectDetails()/updateEditCodeDefect()). -->
+          <div class="form-row">
+            <div class="form-group">
+              <label>Main Defect</label>
+              <select id="editMainDefect" class="form-control" onchange="updateEditDefectDetails()">
+                <option value="" disabled selected>Loading defect categories...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Defect Detail</label>
+              <select id="editDefectDetail" class="form-control" disabled onchange="updateEditCodeDefect()">
+                <option value="" disabled selected>Please select Main Defect first...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Code Defect</label>
+              <input type="text" id="editCodeDefect" class="form-control" readonly placeholder="Auto-filled from Defect Detail">
+            </div>
+          </div>
+
           <div class="form-group">
             <label>Add / Replace Claim Pictures (Unlimited)</label>
             <input type="file" id="editClaimImages" class="form-control" multiple accept="image/png,image/jpeg,image/jpg" style="background:var(--white); cursor:pointer;" onchange="handleEditImagePreviews(this)">
@@ -1390,14 +1463,23 @@
   //   partNo->PartNo, productionDate->ProductionDate,
   //   installDate->InstallDate, occurredDate->OccurredDate,
   //   periodOfUsing->PeriodOfUsing, problemLocation->ProblemLocation,
-  //   detail->Detail — then Apply-to-each over imagesBase64/documentsBase64
-  //   (same Create-file pattern as CLAIM_SUBMIT_URL) and chain the
-  //   "regenerate claims.js" step at the end like every other save flow.
+  //   detail->Detail, distributorName->DistributorName,
+  //   customerCode->CustomerCode, distributorShortName->DistributorShortName,
+  //   mainDefect->MainDefect, defectDetail->DefectDetail,
+  //   codeDefect->CodeDefect — then Apply-to-each over imagesBase64/
+  //   documentsBase64 (same Create-file pattern as CLAIM_SUBMIT_URL) and
+  //   chain the "regenerate claims.js" step at the end like every other
+  //   save flow.
   // NOTE: claims.js's own Select action doesn't expose typeTrouble/country
   // back to the app yet (they were never read-back fields before this),
   // so the Edit Details form can SAVE them correctly but can't PRE-FILL
   // them with the claim's current value until that Select mapping is added
-  // too — same as any other field claims.js doesn't yet carry.
+  // too — same as any other field claims.js doesn't yet carry. The six
+  // Distributor/Defect Category fields added per this request are in
+  // exactly the same boat: CLAIM_SUBMIT_URL and this flow both need those
+  // SharePoint columns (see CLAIM_SUBMIT_URL's own comment) AND the Select
+  // action needs them mapped, or Edit Details will keep saving them fine
+  // while failing to pre-fill/preselect them on the next open.
   // PASTE YOUR PAD/Power Automate HTTP TRIGGER URL BELOW — until you do,
   // saveClaimEdit() falls back to SAVE_INVESTIGATION_URL (which has no
   // handling for this, so edits will keep silently not saving until either
@@ -1830,13 +1912,49 @@
     });
   }
 
+  /** Fills BOTH Step 1's #mainDefect and Claim Monitor Edit Details'
+   *  #editMainDefect from the same live mainDefectDatabase — same
+   *  "populate every form sharing this data at once" pattern
+   *  populateClaimMarketOptions() already uses for Market. */
   function populateMainDefectOptions() {
-    const sel = document.getElementById('mainDefect');
-    if (!sel) return;
-    sel.innerHTML = mainDefectDatabase.length
+    const optionsHtml = mainDefectDatabase.length
       ? '<option value="" disabled selected>Select Main Defect...</option>'
         + mainDefectDatabase.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.mainDefectEn)}</option>`).join('')
       : '<option value="" disabled selected>No defect data available (defects.js not found)</option>';
+    ['mainDefect', 'editMainDefect'].forEach(id => {
+      const sel = document.getElementById(id);
+      if (sel) sel.innerHTML = optionsHtml;
+    });
+  }
+
+  /** Edit-mode counterpart to updateDefectDetails() — identical logic
+   *  against #editMainDefect/#editDefectDetail/#editCodeDefect. Pass a
+   *  code to preselect it (toggleClaimEditMode() uses this to restore the
+   *  claim's currently-saved Defect Detail); omit for a plain onchange
+   *  rebuild. */
+  function updateEditDefectDetails(preselectCode) {
+    const mainDefectId = document.getElementById('editMainDefect').value;
+    const detailSelect = document.getElementById('editDefectDetail');
+    const rows = subDefectDatabase.filter(r => String(r.mainDefectId) === String(mainDefectId));
+
+    detailSelect.innerHTML = '<option value="" disabled' + (preselectCode ? '' : ' selected') + '>Select Defect Detail...</option>'
+      + rows.map(r => {
+          const selected = preselectCode && String(r.code) === String(preselectCode) ? ' selected' : '';
+          return `<option value="${escapeHtml(r.code)}"${selected}>${escapeHtml(r.subDefectDetailClean)}</option>`;
+        }).join('');
+    detailSelect.disabled = rows.length === 0;
+
+    document.getElementById('editCodeDefect').value = '';
+    if (preselectCode && rows.some(r => String(r.code) === String(preselectCode))) {
+      updateEditCodeDefect();
+    }
+  }
+
+  /** Edit-mode counterpart to updateCodeDefect(). */
+  function updateEditCodeDefect() {
+    const code = document.getElementById('editDefectDetail').value;
+    const row = subDefectDatabase.find(r => String(r.code) === String(code));
+    document.getElementById('editCodeDefect').value = row ? row.code : '';
   }
 
   /** Main Defect changed — filter subDefectDatabase to rows whose
@@ -2182,6 +2300,143 @@
   /* Reset part fields on full form reset after submitClaim */
   function resetPartFields() {
     clearPartSelection();
+  }
+
+  /* ── Claim Monitor Edit Details' Part No./Part Name — same
+     search-then-autofill widget as Step 1 above (filterPartNoSuggestions/
+     handlePartNoKeydown/selectPartNo/clearPartSelection), duplicated
+     against the edit* element ids rather than shared, same "separate but
+     parallel" convention this file already uses for Market/Country
+     (updateCountries() vs updateEditCountries()). Previously editPartName/
+     editPartNo were two independent plain text inputs with no link
+     between them — picking a Part No. never touched Part Name at all. ── */
+  let _editPartNoItems = [];
+  let _editPartNoActiveIndex = -1;
+
+  function _editPartNoHighlight(idx) {
+    if (!_editPartNoItems.length) { _editPartNoActiveIndex = -1; return; }
+    if (idx < 0) idx = 0;
+    if (idx > _editPartNoItems.length - 1) idx = _editPartNoItems.length - 1;
+    _editPartNoActiveIndex = idx;
+    _editPartNoItems.forEach((it, i) => { it.el.style.background = (i === idx) ? 'var(--surface-2)' : ''; });
+    _editPartNoItems[idx].el.scrollIntoView({ block: 'nearest' });
+  }
+
+  function filterEditPartNoSuggestions(query) {
+    const box = document.getElementById('editPartNoSuggestBox');
+    if (!box) return;
+    box.innerHTML = '';
+    _editPartNoItems = [];
+    _editPartNoActiveIndex = -1;
+
+    const q = (query || '').trim().toUpperCase();
+
+    const addRow = (no, name, innerHtml, extraStyle) => {
+      const item = document.createElement('div');
+      item.style.cssText = 'padding:9px 12px; cursor:pointer; font-size:12px; border-bottom:1px solid var(--surface-2);' + (extraStyle || '');
+      item.innerHTML = innerHtml;
+      const idx = _editPartNoItems.length;
+      item.onmouseenter = () => _editPartNoHighlight(idx);
+      item.onmousedown  = () => selectEditPartNo(no, name);
+      box.appendChild(item);
+      _editPartNoItems.push({ no, name, el: item });
+    };
+
+    addRow('N/A', 'N/A', 'N/A — Not Applicable', ' color:var(--charcoal-soft);');
+
+    if (typeof PART_NO_NAME === 'undefined') { box.style.display = 'block'; return; }
+    if (!q) { box.style.display = 'block'; return; }
+
+    const allNos = Object.keys(PART_NO_NAME);
+    const matches = allNos.filter(no => no.toUpperCase().includes(q)).slice(0, 40);
+
+    if (!matches.length) {
+      const noMatch = document.createElement('div');
+      noMatch.style.cssText = 'padding:9px 12px; font-size:12px; color:var(--charcoal-soft);';
+      noMatch.textContent = `No match for "${query}" — select N/A or type full Part No.`;
+      box.appendChild(noMatch);
+    } else {
+      matches.forEach(no => {
+        const name = PART_NO_NAME[no] || '';
+        addRow(no, name, `<span style="font-weight:700; color:var(--charcoal);">${no}</span><br><span style="font-size:11px; color:var(--charcoal-soft);">${name}</span>`);
+      });
+    }
+
+    box.style.display = 'block';
+  }
+
+  function handleEditPartNoKeydown(e) {
+    const box = document.getElementById('editPartNoSuggestBox');
+    const isOpen = box && box.style.display !== 'none';
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!isOpen) { filterEditPartNoSuggestions(e.target.value); }
+      _editPartNoHighlight(_editPartNoActiveIndex + 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (isOpen) _editPartNoHighlight(_editPartNoActiveIndex - 1);
+    } else if (e.key === 'Enter') {
+      if (isOpen) {
+        e.preventDefault();
+        if (_editPartNoActiveIndex >= 0 && _editPartNoItems[_editPartNoActiveIndex]) {
+          const it = _editPartNoItems[_editPartNoActiveIndex];
+          selectEditPartNo(it.no, it.name);
+        }
+      }
+    } else if (e.key === 'Escape') {
+      if (box) box.style.display = 'none';
+      _editPartNoActiveIndex = -1;
+    }
+  }
+
+  function selectEditPartNo(no, name) {
+    const searchEl = document.getElementById('editPartNoSearch');
+    const hiddenNo = document.getElementById('editPartNo');
+    if (searchEl) { searchEl.value = no; searchEl.readOnly = true; searchEl.style.background = 'var(--surface-2)'; }
+    if (hiddenNo) hiddenNo.value = no;
+
+    const nameEl = document.getElementById('editPartName');
+    if (nameEl) nameEl.value = name;
+
+    const noClearBtn   = document.getElementById('editPartNoClearBtn');
+    const nameClearBtn = document.getElementById('editPartNameClearBtn');
+    if (noClearBtn)   noClearBtn.style.display   = 'flex';
+    if (nameClearBtn) nameClearBtn.style.display  = 'flex';
+
+    const box = document.getElementById('editPartNoSuggestBox');
+    if (box) box.style.display = 'none';
+  }
+
+  function clearEditPartSelection() {
+    _editPartNoItems = [];
+    _editPartNoActiveIndex = -1;
+
+    const searchEl = document.getElementById('editPartNoSearch');
+    if (searchEl) { searchEl.value = ''; searchEl.readOnly = false; searchEl.style.background = ''; searchEl.focus(); }
+
+    const hiddenNo = document.getElementById('editPartNo');
+    if (hiddenNo) hiddenNo.value = '';
+
+    const nameEl = document.getElementById('editPartName');
+    if (nameEl) nameEl.value = '';
+
+    const noClearBtn   = document.getElementById('editPartNoClearBtn');
+    const nameClearBtn = document.getElementById('editPartNameClearBtn');
+    if (noClearBtn)   noClearBtn.style.display   = 'none';
+    if (nameClearBtn) nameClearBtn.style.display  = 'none';
+  }
+
+  /** Restores the edit widget's display state (search box text + readonly
+   *  state, Part Name, clear-button visibility) from a claim's already-
+   *  saved partNo/partName — called by toggleClaimEditMode() when entering
+   *  edit mode, since selectEditPartNo() alone doesn't cover "arriving
+   *  with a value already set" (no suggestion was actually picked this
+   *  visit). No-ops cleanly to the "nothing picked yet" state when either
+   *  value is blank/N-A. */
+  function restoreEditPartSelection(no, name) {
+    if (!no || no === 'N/A') { clearEditPartSelection(); return; }
+    selectEditPartNo(no, name || '');
   }
 
   const circledNumbers = ['➀','➁','➂','➃','➄','➅','➆','➇','➈','➉'];
@@ -3121,19 +3376,26 @@
       if (preselect && c === preselect) o.selected = true;
       countrySelect.appendChild(o);
     });
+    // Country changed (or was reset) — the previous country's Distributor
+    // Name/Customer Code/Short Name no longer applies. Only reset here
+    // when NOT preselecting (a plain onchange rebuild) — toggleClaimEditMode()
+    // calls updateEditCountries(currentCountry) then immediately preselects
+    // the claim's own saved distributor right after, so resetting here too
+    // would just get overwritten a line later; harmless either way, but
+    // skipping it avoids a flash of "Please select country first..." before
+    // the real distributor renders in.
+    if (!preselect) resetEditDistributorFields();
   }
 
-  /** Step 1 only (Edit Details has no Distributor Name field — Claim
-   *  Country is all it edits). Populates #claimDistributor from
-   *  _distributorsForCountry() for the just-picked country: value is the
-   *  Customer Code (the only field guaranteed unique per row — two rows
-   *  can share the exact same Distributor Name text, e.g. Japan's
-   *  D081MP/D081MR), label is "Distributor Name" or, if more than one row
-   *  shares that name, "Distributor Name (CustomerCode)" so they're still
-   *  distinguishable in the dropdown. Auto-selects (and fills Customer
-   *  Code/Short Name immediately) when the country has exactly one
-   *  distributor — most countries do — so the common case needs no extra
-   *  click. */
+  /** Populates #claimDistributor from _distributorsForCountry() for the
+   *  just-picked country: value is the Customer Code (the only field
+   *  guaranteed unique per row — two rows can share the exact same
+   *  Distributor Name text, e.g. Japan's D081MP/D081MR), label is
+   *  "Distributor Name" or, if more than one row shares that name,
+   *  "Distributor Name (CustomerCode)" so they're still distinguishable in
+   *  the dropdown. Auto-selects (and fills Customer Code/Short Name
+   *  immediately) when the country has exactly one distributor — most
+   *  countries do — so the common case needs no extra click. */
   function updateDistributors() {
     const country = document.getElementById('claimCountry').value;
     const distSelect = document.getElementById('claimDistributor');
@@ -3179,6 +3441,54 @@
     if (distSelect) { distSelect.innerHTML = '<option value="" disabled selected>Please select country first...</option>'; distSelect.disabled = true; }
     const codeEl = document.getElementById('claimCustomerCode'); if (codeEl) codeEl.value = '';
     const shortEl = document.getElementById('claimDistShortName'); if (shortEl) shortEl.value = '';
+  }
+
+  /** Claim Monitor Edit Details' counterpart to updateDistributors() —
+   *  identical logic against #editCountry/#editDistributor/
+   *  #editCustomerCode/#editDistShortName. Pass a customerCode to
+   *  preselect it (toggleClaimEditMode() uses this to restore the claim's
+   *  currently-saved distributor); omit for a plain onchange rebuild. */
+  function updateEditDistributors(preselectCustomerCode) {
+    const country = document.getElementById('editCountry').value;
+    const distSelect = document.getElementById('editDistributor');
+    const rows = _distributorsForCountry(country);
+    const nameCounts = {};
+    rows.forEach(r => { nameCounts[r.distributorName] = (nameCounts[r.distributorName] || 0) + 1; });
+
+    distSelect.innerHTML = '<option value="" disabled' + (preselectCustomerCode ? '' : ' selected') + '>Select Distributor...</option>'
+      + rows.map(r => {
+          const label = nameCounts[r.distributorName] > 1 ? `${r.distributorName} (${r.customerCode})` : r.distributorName;
+          const selected = preselectCustomerCode && r.customerCode === preselectCustomerCode ? ' selected' : '';
+          return `<option value="${escapeHtml(r.customerCode)}"${selected}>${escapeHtml(label)}</option>`;
+        }).join('');
+    distSelect.disabled = rows.length === 0;
+
+    document.getElementById('editCustomerCode').value = '';
+    document.getElementById('editDistShortName').value = '';
+
+    if (preselectCustomerCode && rows.some(r => r.customerCode === preselectCustomerCode)) {
+      updateEditDistributorDetails();
+    } else if (rows.length === 1) {
+      distSelect.value = rows[0].customerCode;
+      updateEditDistributorDetails();
+    }
+  }
+
+  /** Edit-mode counterpart to updateDistributorDetails(). */
+  function updateEditDistributorDetails() {
+    const country = document.getElementById('editCountry').value;
+    const customerCode = document.getElementById('editDistributor').value;
+    const row = _distributorsForCountry(country).find(r => r.customerCode === customerCode);
+    document.getElementById('editCustomerCode').value = row ? row.customerCode : '';
+    document.getElementById('editDistShortName').value = row ? (row.shortName || '') : '';
+  }
+
+  /** Edit-mode counterpart to resetDistributorFields(). */
+  function resetEditDistributorFields() {
+    const distSelect = document.getElementById('editDistributor');
+    if (distSelect) { distSelect.innerHTML = '<option value="" disabled selected>Please select country first...</option>'; distSelect.disabled = true; }
+    const codeEl = document.getElementById('editCustomerCode'); if (codeEl) codeEl.value = '';
+    const shortEl = document.getElementById('editDistShortName'); if (shortEl) shortEl.value = '';
   }
 
   function generateSerialInputs(qty) {
@@ -4846,16 +5156,36 @@
       document.getElementById('editTypeTrouble').value = resolveField(selectedClaimData, ['typeTrouble','TypeTrouble'], 'Unit');
       document.getElementById('editMarket').value     = resolveField(selectedClaimData, ['market','Market'], 'Asia');
       updateEditCountries(resolveField(selectedClaimData, ['country','Country'], ''));
+      // Distributor Name/Customer Code/Short Name — preselect by the
+      // claim's saved Customer Code (the select's value, per
+      // updateEditDistributors()' comment). A claim saved before this
+      // feature existed (or whose saved code no longer matches any
+      // current distributor row) just leaves the select on "Select
+      // Distributor..." with blank Customer Code/Short Name, same as a
+      // brand-new claim — nothing to restore in that case.
+      updateEditDistributors(resolveField(selectedClaimData, ['customerCode','CustomerCode'], ''));
       document.getElementById('editTypeAir').value    = resolveField(selectedClaimData, ['typeAir','TypeAir'], 'RAC');
       document.getElementById('editModel').value      = resolveField(selectedClaimData, ['modelName','ModelName'], '');
       document.getElementById('editSerial').value     = resolveField(selectedClaimData, ['serialNumbers','SerialNumbers'], '');
-      document.getElementById('editPartName').value   = resolveField(selectedClaimData, ['part','Part','partName'], '');
-      document.getElementById('editPartNo').value     = resolveField(selectedClaimData, ['partNo','PartNo'], '');
+      restoreEditPartSelection(
+        resolveField(selectedClaimData, ['partNo','PartNo'], ''),
+        resolveField(selectedClaimData, ['part','Part','partName'], '')
+      );
       const toInputDate = (str) => { if(!str||str==='Not Known'||str==='N/A') return ''; const p=str.split('/'); if(p.length===3){const y=p[2].length===2?'20'+p[2]:p[2]; return `${y}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`;} return ''; };
       document.getElementById('editProdDate').value    = toInputDate(resolveField(selectedClaimData, ['productionDate','ProductionDate'], ''));
       document.getElementById('editInstallDate').value = toInputDate(resolveField(selectedClaimData, ['installDate','InstallDate'], ''));
       document.getElementById('editOccurredDate').value= toInputDate(resolveField(selectedClaimData, ['occurredDate','OccurredDate'], ''));
       document.getElementById('editProbDetail').value  = resolveField(selectedClaimData, ['detail','Detail','problemDetail'], '');
+      // Defect Category — Main Defect was stored as its DISPLAY text
+      // (mainDefectEn), not the id the select actually uses as a value
+      // (see submitClaim()'s comment), so preselecting means looking the
+      // id back up by that text first. Same "no match = leave blank"
+      // fallback as Distributor Name above for claims saved before this
+      // feature existed.
+      const savedMainDefectText = resolveField(selectedClaimData, ['mainDefect','MainDefect'], '');
+      const matchedMainDefect = mainDefectDatabase.find(d => d.mainDefectEn === savedMainDefectText);
+      document.getElementById('editMainDefect').value = matchedMainDefect ? matchedMainDefect.id : '';
+      updateEditDefectDetails(resolveField(selectedClaimData, ['codeDefect','CodeDefect'], ''));
       editImageFiles = []; editDocFiles = [];
       document.getElementById('editImagePreviews').innerHTML = '';
       document.getElementById('editDocPreviews').innerHTML   = '';
@@ -4879,6 +5209,13 @@
         typeTrouble:     document.getElementById('editTypeTrouble').value,
         market:          document.getElementById('editMarket').value,
         country:         document.getElementById('editCountry').value,
+        // Distributor Name resolved to its DISPLAY text (not the raw
+        // Customer Code the select uses as a value) — same convention
+        // submitClaim() uses on Step 1.
+        distributorName:      (_distributorsForCountry(document.getElementById('editCountry').value)
+                                  .find(r => r.customerCode === document.getElementById('editDistributor').value) || {}).distributorName || '',
+        customerCode:         document.getElementById('editCustomerCode').value,
+        distributorShortName: document.getElementById('editDistShortName').value,
         typeAir:         document.getElementById('editTypeAir').value,
         modelName:       document.getElementById('editModel').value,
         serialNumbers:   document.getElementById('editSerial').value,
@@ -4890,6 +5227,11 @@
         // them even though the request itself succeeded.
         part:            document.getElementById('editPartName').value,
         partNo:          document.getElementById('editPartNo').value,
+        // Defect Category — mainDefect resolved to its DISPLAY text, same
+        // convention as submitClaim() and Distributor Name above.
+        mainDefect:   (mainDefectDatabase.find(d => String(d.id) === document.getElementById('editMainDefect').value) || {}).mainDefectEn || '',
+        defectDetail: document.getElementById('editDefectDetail').selectedOptions[0]?.textContent || '',
+        codeDefect:   document.getElementById('editCodeDefect').value,
         productionDate:  formatDate(document.getElementById('editProdDate').value),
         installDate:     formatDate(document.getElementById('editInstallDate').value),
         occurredDate:    formatDate(document.getElementById('editOccurredDate').value),
@@ -4909,12 +5251,18 @@
       selectedClaimData.typeTrouble     = payload.typeTrouble;
       selectedClaimData.market          = payload.market;
       selectedClaimData.country         = payload.country;
+      selectedClaimData.distributorName      = payload.distributorName;
+      selectedClaimData.customerCode         = payload.customerCode;
+      selectedClaimData.distributorShortName = payload.distributorShortName;
       selectedClaimData.typeAir         = payload.typeAir;
       selectedClaimData.TypeAir         = payload.typeAir;
       selectedClaimData.modelName       = payload.modelName;
       selectedClaimData.serialNumbers   = payload.serialNumbers;
       selectedClaimData.part            = payload.part;
       selectedClaimData.partNo          = payload.partNo;
+      selectedClaimData.mainDefect      = payload.mainDefect;
+      selectedClaimData.defectDetail    = payload.defectDetail;
+      selectedClaimData.codeDefect      = payload.codeDefect;
       selectedClaimData.productionDate  = payload.productionDate;
       selectedClaimData.installDate     = payload.installDate;
       selectedClaimData.occurredDate    = payload.occurredDate;
