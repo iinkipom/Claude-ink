@@ -30,18 +30,14 @@
             'draw-circle': 'drawCircle 1.5s ease-out forwards',
             'draw-check': 'drawCheck 1s 0.8s ease-out forwards',
             'bounce-arrow': 'bounceArrow 2s infinite ease-in-out',
-            // Q-FLOW logo flame — a slow, smooth breathing motion (scaleY +
-            // a whisper of skew, plus a brightness shimmer) instead of the
-            // rotate-based wobble this replaces, which read as a jittery
-            // toy rather than a flame. Glow and embers each run on their
-            // OWN duration so they drift in and out of phase with the
-            // flame and each other rather than pulsing in lockstep, which
-            // is what makes it read as organic instead of mechanical.
-            'qflow-flame': 'qflowFlameFlicker 3.6s cubic-bezier(0.45,0,0.55,1) infinite',
-            'qflow-glow': 'qflowFlameGlowPulse 2.8s ease-in-out infinite',
-            'qflow-ember-1': 'qflowEmberRise 3.2s cubic-bezier(0.25,0.46,0.45,0.94) infinite',
-            'qflow-ember-2': 'qflowEmberRise 3.2s cubic-bezier(0.25,0.46,0.45,0.94) infinite 1.1s',
-            'qflow-ember-3': 'qflowEmberRise 3.2s cubic-bezier(0.25,0.46,0.45,0.94) infinite 2.1s',
+            // Q-FLOW logo — the artwork is now the actual supplied image
+            // file (assets/image 1.png), not hand-drawn SVG, so there's no
+            // flame shape left to animate directly. This instead animates
+            // a glow halo sitting BEHIND the image: a slow, smooth
+            // breathing blur/opacity/scale pulse, eased with a
+            // cubic-bezier curve (not linear ease-in-out) so it reads as
+            // ambient energy rather than a mechanical flash.
+            'qflow-icon-glow': 'qflowIconGlowPulse 3.4s cubic-bezier(0.45,0,0.55,1) infinite',
           },
           keyframes: {
             blob: {
@@ -70,21 +66,9 @@
               '0%, 100%': { transform: 'translate(0, 0)' },
               '50%': { transform: 'translate(3px, 3px)' },
             },
-            qflowFlameFlicker: {
-              '0%':   { transform: 'scaleY(1) skewX(0deg)',        filter: 'brightness(1)' },
-              '25%':  { transform: 'scaleY(1.035) skewX(-1.2deg)', filter: 'brightness(1.08)' },
-              '50%':  { transform: 'scaleY(0.985) skewX(0.6deg)',  filter: 'brightness(0.97)' },
-              '75%':  { transform: 'scaleY(1.02) skewX(-0.6deg)',  filter: 'brightness(1.05)' },
-              '100%': { transform: 'scaleY(1) skewX(0deg)',        filter: 'brightness(1)' },
-            },
-            qflowFlameGlowPulse: {
-              '0%, 100%': { opacity: '0.4' },
-              '50%':      { opacity: '0.8' },
-            },
-            qflowEmberRise: {
-              '0%':   { transform: 'translate(0,0) scale(1)', opacity: '0' },
-              '15%':  { opacity: '0.85' },
-              '100%': { transform: 'translate(3px,-18px) scale(0.15)', opacity: '0' },
+            qflowIconGlowPulse: {
+              '0%, 100%': { opacity: '0.5', transform: 'scale(0.94)' },
+              '50%':      { opacity: '0.95', transform: 'scale(1.06)' },
             },
           }
         }
@@ -139,50 +123,17 @@
       
       <div class="relative z-10">
         <!-- ═══════════════ Q-FLOW BRAND MARK ═══════════════ -->
-        <!-- Matches the supplied logo artwork: a blue-to-magenta gradient
-             "Q" ring, a diagonal pill for the Q's tail, and a flame merging
-             into the ring's top-right gap — same flame position as the
-             source image. The flame flickers/glows/embers continuously via
-             plain CSS keyframes (see the <style> block above:
-             qflowFlameFlicker / qflowFlameGlowPulse / qflowEmberRise),
-             not JS, so it's always animating. -->
+        <!-- The actual logo file (assets/image 1.png), not a hand-drawn
+             recreation — same "Smart Quality Control System" app folder
+             this file itself lives in. The glow halo behind it is a
+             Tailwind-config animation (animate-qflow-icon-glow, see
+             tailwind.config above), a slow breathing blur+opacity+scale
+             pulse — it animates the halo, not the artwork's own pixels,
+             since a flat image can't have just one region of it animated. -->
         <div class="flex items-center gap-5 mb-12 select-none group">
           <div class="relative flex items-center justify-center w-24 h-24 shrink-0 transition-transform duration-500 group-hover:-translate-y-0.5">
-            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" class="w-full h-full drop-shadow-[0_8px_20px_rgba(47,107,255,0.35)]">
-              <defs>
-                <linearGradient id="qflowRingGrad" x1="50" y1="6" x2="50" y2="92" gradientUnits="userSpaceOnUse">
-                  <stop offset="0%" stop-color="#33d2ff"/><stop offset="45%" stop-color="#4b7bff"/><stop offset="100%" stop-color="#ff2f7e"/>
-                </linearGradient>
-                <linearGradient id="qflowPillGrad" x1="30" y1="55" x2="88" y2="95" gradientUnits="userSpaceOnUse">
-                  <stop offset="0%" stop-color="#2fa8ff"/><stop offset="100%" stop-color="#7a3cff"/>
-                </linearGradient>
-                <linearGradient id="qflowFlameGrad" x1="60" y1="4" x2="82" y2="42" gradientUnits="userSpaceOnUse">
-                  <stop offset="0%" stop-color="#eafcff"/><stop offset="35%" stop-color="#4fd8ff"/><stop offset="100%" stop-color="#2f6bff"/>
-                </linearGradient>
-                <filter id="qflowSoftBlur"><feGaussianBlur stdDeviation="3"/></filter>
-              </defs>
-              <!-- Ring (Q body) — small gap at top where the flame merges in -->
-              <circle cx="46" cy="54" r="31" fill="none" stroke="url(#qflowRingGrad)" stroke-width="15" stroke-linecap="round" stroke-dasharray="184 195" stroke-dashoffset="-30" transform="rotate(-2 46 54)"/>
-              <!-- Diagonal pill crossing the bottom-right (the Q "tail") -->
-              <g transform="rotate(45 70 74)">
-                <rect x="46" y="65" width="52" height="19" rx="9.5" fill="url(#qflowPillGrad)"/>
-                <rect x="46" y="65" width="52" height="7" rx="3.5" fill="#ffffff" opacity="0.2"/>
-              </g>
-              <!-- Flame — animate-qflow-flame is the slow scaleY+skew
-                   "breathing" flicker (see tailwind.config's keyframes
-                   above); origin-[68%_78%] pins the motion to the flame's
-                   base, where it merges into the ring, so only the tip
-                   visibly sways. motion-reduce:animate-none respects
-                   prefers-reduced-motion. -->
-              <g class="origin-[68%_78%] animate-qflow-flame motion-reduce:animate-none">
-                <path class="animate-qflow-glow motion-reduce:animate-none" d="M53,30 C48,24 47,16 52,8 C53,14 57,15 58,11 C61,15 61,21 57,25 C63,23 67,17 65,9 C72,13 74,22 68,29 C71,27 73,24 73,20 C77,25 76,32 70,35 C62,40 56,37 53,30 Z" fill="#4fd8ff" opacity="0.55" filter="url(#qflowSoftBlur)"/>
-                <path d="M53,30 C48,24 47,16 52,8 C53,14 57,15 58,11 C61,15 61,21 57,25 C63,23 67,17 65,9 C72,13 74,22 68,29 C71,27 73,24 73,20 C77,25 76,32 70,35 C62,40 56,37 53,30 Z" fill="url(#qflowFlameGrad)"/>
-                <path d="M56,26 C54,22 55,18 58,15" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" opacity="0.5" fill="none"/>
-              </g>
-              <circle class="animate-qflow-ember-1 motion-reduce:animate-none" cx="66" cy="10" r="1.5" fill="#8fe8ff"/>
-              <circle class="animate-qflow-ember-2 motion-reduce:animate-none" cx="73" cy="16" r="1.1" fill="#8fe8ff"/>
-              <circle class="animate-qflow-ember-3 motion-reduce:animate-none" cx="60" cy="6"  r="1.2" fill="#c9f5ff"/>
-            </svg>
+            <div class="absolute -inset-2 rounded-[28px] bg-[radial-gradient(circle,rgba(79,216,255,0.55)_0%,rgba(47,107,255,0.35)_55%,transparent_75%)] blur-xl animate-qflow-icon-glow motion-reduce:animate-none"></div>
+            <img src="assets/image%201.png" alt="Q-FLOW" class="relative z-10 w-full h-full object-cover rounded-3xl drop-shadow-[0_8px_20px_rgba(47,107,255,0.35)]">
           </div>
 
           <!-- Elegant Wordmark -->

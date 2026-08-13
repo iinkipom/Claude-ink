@@ -364,53 +364,43 @@ body.sidebar-collapsed .sidebar-edge-toggle { left: 0; }
   padding: 6px 8px; margin-bottom: 30px;
   position: relative; z-index: 1;
 }
-/* Q-FLOW brand mark — matches the supplied logo artwork (blue-to-magenta
-   "Q" ring, diagonal pill tail, flame merging into the ring's top-right
-   gap). Drawn as inline SVG directly in the HTML (see the sidebar-logo
-   markup) rather than as a CSS background box like the old logomark, so
-   only the flame animation below lives here. index.html's login-page logo
-   uses the exact same SVG shapes/gradients, just scaled up. */
-.sidebar-logo-icon-svg { flex-shrink: 0; filter: drop-shadow(0 4px 10px rgba(47,107,255,0.35)); }
+/* Q-FLOW brand mark — the actual logo file (assets/image 1.png), not a
+   hand-drawn recreation. .sidebar-logo-icon-wrap is a small positioning
+   context (relative) so the glow halo can sit behind the image via
+   absolute positioning; index.html's login-page logo uses the identical
+   two-layer structure, just scaled up. */
+.sidebar-logo-icon-wrap { position: relative; width: 34px; height: 34px; flex-shrink: 0; }
+.sidebar-logo-icon-img {
+  position: relative; z-index: 1;
+  width: 100%; height: 100%;
+  border-radius: 9px;
+  object-fit: cover;
+  display: block;
+}
 
-/* Flame — a slow, smooth breathing motion (scaleY + a whisper of skew,
-   plus a brightness shimmer) rather than a rotate-based wobble, which
-   read as a jittery toy instead of a flame. Glow and embers each run on
-   their OWN duration (2.8s / 3.2s vs. the flame's 3.6s) so they drift in
-   and out of phase with the flame and each other instead of pulsing in
-   lockstep — that desync is what reads as organic rather than
-   mechanical. transform-origin sits at the flame's base (where it
-   merges into the ring) so only the tip visibly sways, like a real
-   flame. index.html's login-page logo runs the exact same curves via
-   Tailwind's animation config instead of these plain classes, since that
-   file already has Tailwind loaded and follows that convention for its
-   other animations — main.html doesn't use Tailwind, so this stays
-   plain CSS here. */
-.qflow-flame-wrap {
-  transform-origin: 68% 78%;
-  animation: qflowFlameFlicker 3.6s cubic-bezier(0.45,0,0.55,1) infinite;
+/* Glow halo — an elegant, slow "breathing" pulse behind the artwork
+   (blur + opacity + a whisper of scale), rather than anything animating
+   the artwork's own pixels, which isn't possible for a flat image. Runs
+   on a long, gentle cycle (3.4s) with smooth cubic-bezier easing so it
+   reads as ambient energy, not a flashing effect.
+   index.html runs the identical curve via Tailwind's animation config
+   instead of this plain class, since that file already has Tailwind and
+   follows that convention for its other animations — main.html doesn't
+   use Tailwind, so this stays plain CSS here. */
+.qflow-icon-glow {
+  position: absolute; z-index: 0;
+  inset: -6px;
+  border-radius: 12px;
+  background: radial-gradient(circle, rgba(79,216,255,0.55) 0%, rgba(47,107,255,0.35) 55%, transparent 75%);
+  filter: blur(8px);
+  animation: qflowIconGlowPulse 3.4s cubic-bezier(0.45,0,0.55,1) infinite;
 }
-@keyframes qflowFlameFlicker {
-  0%   { transform: scaleY(1) skewX(0deg);        filter: brightness(1); }
-  25%  { transform: scaleY(1.035) skewX(-1.2deg); filter: brightness(1.08); }
-  50%  { transform: scaleY(0.985) skewX(0.6deg);  filter: brightness(0.97); }
-  75%  { transform: scaleY(1.02) skewX(-0.6deg);  filter: brightness(1.05); }
-  100% { transform: scaleY(1) skewX(0deg);        filter: brightness(1); }
-}
-.qflow-flame-glow { animation: qflowFlameGlowPulse 2.8s ease-in-out infinite; }
-@keyframes qflowFlameGlowPulse {
-  0%, 100% { opacity: 0.4; }
-  50%      { opacity: 0.8; }
-}
-.qflow-ember { animation: qflowEmberRise 3.2s cubic-bezier(0.25,0.46,0.45,0.94) infinite; }
-.qflow-ember-2 { animation-delay: 1.1s; }
-.qflow-ember-3 { animation-delay: 2.1s; }
-@keyframes qflowEmberRise {
-  0%   { transform: translate(0,0) scale(1); opacity: 0; }
-  15%  { opacity: 0.85; }
-  100% { transform: translate(3px,-18px) scale(0.15); opacity: 0; }
+@keyframes qflowIconGlowPulse {
+  0%, 100% { opacity: 0.5; transform: scale(0.94); }
+  50%      { opacity: 0.95; transform: scale(1.06); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .qflow-flame-wrap, .qflow-flame-glow, .qflow-ember { animation: none; }
+  .qflow-icon-glow { animation: none; }
 }
 
 .sidebar-logo-word {

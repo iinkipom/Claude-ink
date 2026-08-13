@@ -74,39 +74,20 @@
 
 <aside class="sidebar">
   <div class="sidebar-logo">
-    <!-- Q-FLOW brand mark — matches the supplied logo artwork: a blue-to-
-         magenta gradient "Q" ring, a diagonal pill for the Q's tail, and a
-         flame merging into the ring's top-right gap (same flame position
-         as the source image). The flame's flicker/glow/ember animation is
-         plain CSS (see .qflow-flame* in styles.css), not baked into the
-         SVG, so it keeps animating without any JS. -->
-    <svg class="sidebar-logo-icon-svg" width="34" height="34" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="qflowRingGradSm" x1="50" y1="6" x2="50" y2="92" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#33d2ff"/><stop offset="45%" stop-color="#4b7bff"/><stop offset="100%" stop-color="#ff2f7e"/>
-        </linearGradient>
-        <linearGradient id="qflowPillGradSm" x1="30" y1="55" x2="88" y2="95" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#2fa8ff"/><stop offset="100%" stop-color="#7a3cff"/>
-        </linearGradient>
-        <linearGradient id="qflowFlameGradSm" x1="60" y1="4" x2="82" y2="42" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#eafcff"/><stop offset="35%" stop-color="#4fd8ff"/><stop offset="100%" stop-color="#2f6bff"/>
-        </linearGradient>
-        <filter id="qflowSoftBlurSm"><feGaussianBlur stdDeviation="3"/></filter>
-      </defs>
-      <circle cx="46" cy="54" r="31" fill="none" stroke="url(#qflowRingGradSm)" stroke-width="15" stroke-linecap="round" stroke-dasharray="184 195" stroke-dashoffset="-30" transform="rotate(-2 46 54)"/>
-      <g transform="rotate(45 70 74)">
-        <rect x="46" y="65" width="52" height="19" rx="9.5" fill="url(#qflowPillGradSm)"/>
-        <rect x="46" y="65" width="52" height="7" rx="3.5" fill="#ffffff" opacity="0.2"/>
-      </g>
-      <g class="qflow-flame-wrap">
-        <path class="qflow-flame-glow" d="M53,30 C48,24 47,16 52,8 C53,14 57,15 58,11 C61,15 61,21 57,25 C63,23 67,17 65,9 C72,13 74,22 68,29 C71,27 73,24 73,20 C77,25 76,32 70,35 C62,40 56,37 53,30 Z" fill="#4fd8ff" opacity="0.55" filter="url(#qflowSoftBlurSm)"/>
-        <path d="M53,30 C48,24 47,16 52,8 C53,14 57,15 58,11 C61,15 61,21 57,25 C63,23 67,17 65,9 C72,13 74,22 68,29 C71,27 73,24 73,20 C77,25 76,32 70,35 C62,40 56,37 53,30 Z" fill="url(#qflowFlameGradSm)"/>
-        <path d="M56,26 C54,22 55,18 58,15" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" opacity="0.5" fill="none"/>
-      </g>
-      <circle class="qflow-ember qflow-ember-1" cx="66" cy="10" r="1.5" fill="#8fe8ff"/>
-      <circle class="qflow-ember qflow-ember-2" cx="73" cy="16" r="1.1" fill="#8fe8ff"/>
-      <circle class="qflow-ember qflow-ember-3" cx="60" cy="6"  r="1.2" fill="#c9f5ff"/>
-    </svg>
+    <!-- Q-FLOW brand mark — the actual supplied logo file, loaded from the
+         app's own assets folder (same "Smart Quality Control System"
+         folder main.html/index.html already live in — see e.g.
+         claimData.systemLinkUrl or the users.js diagnostic message
+         elsewhere in this file for other Z:\...\Smart Quality Control
+         System\ references). Replace assets/image 1.png with your file if
+         you rename/move it. The glow halo behind it is a plain CSS
+         animation (see .qflow-icon-glow in styles.css), not baked into
+         the image, so it keeps animating without touching the artwork
+         itself. -->
+    <div class="sidebar-logo-icon-wrap">
+      <div class="qflow-icon-glow"></div>
+      <img class="sidebar-logo-icon-img" src="assets/image%201.png" alt="Q-FLOW">
+    </div>
     <div class="sidebar-logo-word">
       <div class="sidebar-logo-word-main"><span class="sidebar-logo-q">Q-FLOW</span></div>
       <div class="sidebar-logo-tagline"><span class="sidebar-logo-tagline-dash"></span>Quality Control</div>
