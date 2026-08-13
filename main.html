@@ -231,17 +231,36 @@
         <div class="form-row">
           <div class="form-group">
             <label>Claim Market</label>
+            <!-- Options populated by populateClaimMarketOptions() from
+                 distributorDatabase (distributors.js) — see that function's
+                 comment. Starts with a loading placeholder; the FALLBACK_
+                 DISTRIBUTOR_DATABASE seed means it's never actually empty
+                 even before distributors.js finishes loading. -->
             <select id="claimMarket" class="form-control" required onchange="updateCountries()">
-              <option value="" disabled selected>Select Region...</option>
-              <option value="Asia">Asia</option><option value="Europe">Europe</option>
-              <option value="Southeast Asia">Southeast Asia</option><option value="Australia">Australia</option>
+              <option value="" disabled selected>Loading markets...</option>
             </select>
           </div>
           <div class="form-group">
             <label>Claim Country</label>
-            <select id="claimCountry" class="form-control" required disabled>
+            <select id="claimCountry" class="form-control" required disabled onchange="updateDistributors()">
               <option value="" disabled selected>Please select market first...</option>
             </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Distributor Name</label>
+            <select id="claimDistributor" class="form-control" required disabled onchange="updateDistributorDetails()">
+              <option value="" disabled selected>Please select country first...</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Customer Code</label>
+            <input type="text" id="claimCustomerCode" class="form-control" readonly placeholder="Auto-filled from Distributor Name">
+          </div>
+          <div class="form-group">
+            <label>Distributor Short Name</label>
+            <input type="text" id="claimDistShortName" class="form-control" readonly placeholder="Auto-filled from Distributor Name">
           </div>
         </div>
       </div>
@@ -436,9 +455,11 @@
           <div class="form-row">
             <div class="form-group">
               <label>Market</label>
+              <!-- Options populated by populateClaimMarketOptions() — same
+                   distributorDatabase source as Claim Market on Step 1, so
+                   the two forms never show a different country list. -->
               <select id="editMarket" class="form-control" onchange="updateEditCountries()">
-                <option value="Asia">Asia</option><option value="Europe">Europe</option>
-                <option value="Southeast Asia">Southeast Asia</option><option value="Australia">Australia</option>
+                <option value="" disabled selected>Loading markets...</option>
               </select>
             </div>
             <div class="form-group">
@@ -1577,12 +1598,143 @@
     };
   })();
 
-  const countryDatabase = {
-    "Asia": ["Japan","China","South Korea","Taiwan","Hong Kong","Macau"],
-    "Europe": ["United Kingdom","Germany","France","Italy","Spain","Netherlands"],
-    "Southeast Asia": ["Singapore","India","Turkey","Philippines","Thailand","Malaysia","Vietnam","Indonesia","Myanmar"],
-    "Australia": ["Australia","New Zealand"]
-  };
+  /* ── DISTRIBUTOR / COUNTRY / MARKET DATABASE ─────────────────────────────
+     Drives Step 1 (Issuing Claim Case)'s Claim Market -> Claim Country ->
+     Distributor Name chain, and Claim Monitor "Edit Details"'s Market ->
+     Claim Country pair. Replaces the old hardcoded countryDatabase (a
+     4-market, ~20-country guess) with real data from the shared
+     Distributor_info._1.xlsx workbook's "Sheet4" tab (Countries | Customer
+     code | Distributor name | Short name) plus a `market` field this app
+     adds by grouping each country into a region:
+       East Asia            — China, Hong Kong, Japan, Taiwan
+       Southeast Asia        — Brunei, Cambodia, Indonesia, Malaysia,
+                                Myanmar, Philippines, Singapore, Thailand,
+                                Vietnam
+       South Asia            — Bangladesh, India, Nepal, Pakistan, Sri Lanka
+       Middle East & Africa   — Ghana, Iran, Qatar, Turkey
+       Oceania                — Australia, New Caledonia
+       Europe                 — United Kingdom
+       Americas               — Argentina, Brazil, Costa Rica, Mexico
+     A country can have MULTIPLE distributor rows (e.g. Japan has 4,
+     Vietnam has 4) — that's exactly why Distributor Name is its own select
+     rather than being folded into Country: Customer Code and Short Name
+     both depend on WHICH distributor within that country, not just the
+     country itself.
+
+     FALLBACK_DISTRIBUTOR_DATABASE below is a snapshot of that same data,
+     embedded directly so the form is never actually empty/broken even
+     before distributors.js finishes loading (or if it 404s) — same
+     "never fully blocked" spirit as loadPartsDatabase()'s degraded
+     "type manually" fallback. distributorDatabase (the live variable
+     every lookup below actually reads) starts pointing at this snapshot
+     and gets swapped for the freshly loaded distributors.js array the
+     moment loadDistributorDatabase() succeeds — see that function.
+
+     KEEPING THIS CURRENT: distributors.js is meant to be regenerated
+     (matching this exact {market, country, customerCode, distributorName,
+     shortName} shape) whenever Distributor_info._1.xlsx changes — same
+     "PAD flow regenerates a .js snapshot" pattern as parts.js/users.js/
+     claims.js/Evaluates.js. Until that flow exists, replace
+     distributors.js by hand after editing the source workbook. */
+  const FALLBACK_DISTRIBUTOR_DATABASE = [
+    {"market": "Americas", "country": "Argentina", "customerCode": "D054PS", "distributorName": "PRODUCT S SOLUTIONS SA", "shortName": "LPS"},
+    {"market": "Oceania", "country": "Australia", "customerCode": "D061MA", "distributorName": "MITSUBISHI HEAVY INDUSTRIES AIR-CONDITIONERS AUSTRALIA, PTY. LTD", "shortName": "MHIAA"},
+    {"market": "South Asia", "country": "Bangladesh", "customerCode": "D880EE", "distributorName": "ESQUIRE ELECTRONICS LTD.", "shortName": "BANGLA"},
+    {"market": "Americas", "country": "Brazil", "customerCode": "D055NV", "distributorName": "NOVAIR IMPORTACAO & EXPORTACAO LTDA", "shortName": "LNOVAI"},
+    {"market": "Southeast Asia", "country": "Brunei", "customerCode": "D673BS", "distributorName": "BEE SENG AIR-CONDITIONING & ENGINEERING SDN. BHD", "shortName": "BEESEN"},
+    {"market": "Southeast Asia", "country": "Cambodia", "customerCode": "D855HS", "distributorName": "HSC DECOR CENTER CO., LTD.", "shortName": "HSC"},
+    {"market": "East Asia", "country": "China", "customerCode": "D086MJ", "distributorName": "MITSUBISHI HEAVY INDUSTRIES JINLING AIR-CONDITIONERS CO.,LTD.", "shortName": "MJA"},
+    {"market": "Americas", "country": "Costa Rica", "customerCode": "D506ML", "distributorName": "MULTIFRIO S.A.", "shortName": "LMULTI"},
+    {"market": "Middle East & Africa", "country": "Ghana", "customerCode": "D233GH", "distributorName": "PENTRAGG ENGINEERING LTD.", "shortName": "PENTRAGG"},
+    {"market": "East Asia", "country": "Hong Kong", "customerCode": "D852MH", "distributorName": "MITSUBISHI HEAVY INDUSTRIES (HK) LIMITED", "shortName": "MHIH"},
+    {"market": "South Asia", "country": "India", "customerCode": "D091IA", "distributorName": "INTERNATIONAL AIRCON PVT.LTD.", "shortName": "IAPL"},
+    {"market": "South Asia", "country": "India", "customerCode": "D091SV", "distributorName": "SHINRYO SUVIDHA ENGINEERS INDIA PVT. LTD", "shortName": "SUVIDA"},
+    {"market": "Southeast Asia", "country": "Indonesia", "customerCode": "D062BS", "distributorName": "PT. BERKAT SARANA AIRCON", "shortName": "BSAIR"},
+    {"market": "Southeast Asia", "country": "Indonesia", "customerCode": "D062GB", "distributorName": "PT.GRAHA BERKAT TRADING", "shortName": "GRAHA"},
+    {"market": "Middle East & Africa", "country": "Iran", "customerCode": "D098AM", "distributorName": "CHALIAN CORPORATION", "shortName": "CHALIAN"},
+    {"market": "East Asia", "country": "Japan", "customerCode": "D081MP", "distributorName": "MITSUBISHI HEAVY INDUSTRIES AIR-CONDITIONING AND REFRIGERATION, LTD.", "shortName": "MTH"},
+    {"market": "East Asia", "country": "Japan", "customerCode": "D081MR", "distributorName": "MITSUBISHI HEAVY INDUSTRIES AIR-CONDITIONING AND REFRIGERATION, LTD.", "shortName": ""},
+    {"market": "East Asia", "country": "Japan", "customerCode": "D081MT", "distributorName": "MTH", "shortName": ""},
+    {"market": "East Asia", "country": "Japan", "customerCode": "D081TC", "distributorName": "T.CHATANI CO.,LTD.", "shortName": "CHATANI"},
+    {"market": "Southeast Asia", "country": "Malaysia", "customerCode": "D060IM", "distributorName": "IMZ SDN BHD", "shortName": "IMZ"},
+    {"market": "Southeast Asia", "country": "Malaysia", "customerCode": "D060TR", "distributorName": "TRIO ELECTRIC & AUTOMATION (M) SDN BHD", "shortName": "TRIO"},
+    {"market": "Americas", "country": "Mexico", "customerCode": "D052CL", "distributorName": "CLIMA EFICIENT DE JAPAN, S.A. DE C.V.", "shortName": "LCLIMA"},
+    {"market": "Southeast Asia", "country": "Myanmar", "customerCode": "D095OM", "distributorName": "ONE M (MYANMAR)", "shortName": "ONE M"},
+    {"market": "South Asia", "country": "Nepal", "customerCode": "D977AT", "distributorName": "AIRTECH INDUSTRIES PVT. LTD.", "shortName": "AIRTEC"},
+    {"market": "South Asia", "country": "Nepal", "customerCode": "D977HT", "distributorName": "AIRTECH INDUSTRIES PVT. LTD.", "shortName": ""},
+    {"market": "Oceania", "country": "New Caledonia", "customerCode": "D687NC", "distributorName": "NBK CORPORATION", "shortName": "NBK"},
+    {"market": "South Asia", "country": "Pakistan", "customerCode": "D092OR", "distributorName": "ORIENT ELECTRONICS (PVT) LTD.", "shortName": "ORIENT"},
+    {"market": "Southeast Asia", "country": "Philippines", "customerCode": "D063MA", "distributorName": "MIT-AIR INC.", "shortName": "MIT AIR"},
+    {"market": "Middle East & Africa", "country": "Qatar", "customerCode": "D974TY", "distributorName": "AI TEYSEER AIR CONDITIONING & REFRIGERATION", "shortName": "TEYSER"},
+    {"market": "Southeast Asia", "country": "Singapore", "customerCode": "D065KM", "distributorName": "KM MARKETING PTE LTD", "shortName": "KM"},
+    {"market": "South Asia", "country": "Sri Lanka", "customerCode": "D094SG", "distributorName": "SINGER (SRI LANKA) PLC.", "shortName": "SINGER"},
+    {"market": "East Asia", "country": "Taiwan", "customerCode": "D886TB", "distributorName": "TOYO-BOEKI", "shortName": "TOYO-BOEKI"},
+    {"market": "East Asia", "country": "Taiwan", "customerCode": "D886UY", "distributorName": "UP YOUNG CORNERSTONE CORPORATION", "shortName": "UP YOUNG"},
+    {"market": "Southeast Asia", "country": "Thailand", "customerCode": "D066MJ", "distributorName": "MAHAJAK AIR CONDITIONERS CO.,LTD.", "shortName": "MAC"},
+    {"market": "Southeast Asia", "country": "Thailand", "customerCode": "D066MJ", "distributorName": "MAHAJAK DEVELOPMENT CO.,LTD.", "shortName": "MDC"},
+    {"market": "Middle East & Africa", "country": "Turkey", "customerCode": "D090FM", "distributorName": "FORM MHI KLIMA SISTEMLERI SAN. VE TIC.A.S.", "shortName": "FORM"},
+    {"market": "Middle East & Africa", "country": "Turkey", "customerCode": "D090TK", "distributorName": "TEKNOSA IC VE DIS TICARET A.S.", "shortName": "TEKNOSA"},
+    {"market": "Europe", "country": "United Kingdom", "customerCode": "D044ME", "distributorName": "MHIAE", "shortName": "MHIAE"},
+    {"market": "Southeast Asia", "country": "Vietnam", "customerCode": "D084HL", "distributorName": "CONG TY TNHH HAILI", "shortName": "HAILI"},
+    {"market": "Southeast Asia", "country": "Vietnam", "customerCode": "D084HT", "distributorName": "HANOI TECHNIQUES JOINT STOCK COMPANY", "shortName": "HATECH"},
+    {"market": "Southeast Asia", "country": "Vietnam", "customerCode": "D084VK", "distributorName": "VELK TRADING CORPORATION", "shortName": "VELK"},
+    {"market": "Southeast Asia", "country": "Vietnam", "customerCode": "D084VT", "distributorName": "VIETCAN CORPORATION", "shortName": "VTECO"},
+  ];
+  let distributorDatabase = FALLBACK_DISTRIBUTOR_DATABASE;
+
+  function loadDistributorDatabase() {
+    loadDataScript('distributors.js', ['DISTRIBUTOR_DATABASE']).then(({ DISTRIBUTOR_DATABASE }) => {
+      if (Array.isArray(DISTRIBUTOR_DATABASE) && DISTRIBUTOR_DATABASE.length) {
+        distributorDatabase = DISTRIBUTOR_DATABASE;
+        console.log(`[distributors.js] ✔ ${DISTRIBUTOR_DATABASE.length} distributor rows loaded`);
+      } else {
+        console.warn('[distributors.js] ⚠ loaded but DISTRIBUTOR_DATABASE not found/empty — keeping fallback data');
+      }
+      populateClaimMarketOptions();
+    }).catch(e => {
+      console.warn('[distributors.js] ⚠ could not load — using fallback distributor data:', e);
+      populateClaimMarketOptions();
+    });
+  }
+
+  /** Every unique market, alphabetical, from whichever distributor dataset
+   *  is currently live (see distributorDatabase above). */
+  function _marketList() {
+    return Array.from(new Set(distributorDatabase.map(r => r.market))).sort();
+  }
+  /** Every unique country for one market, alphabetical. */
+  function _countriesForMarket(market) {
+    return Array.from(new Set(distributorDatabase.filter(r => r.market === market).map(r => r.country))).sort();
+  }
+  /** Every distributor row for one country — a country can have more than
+   *  one (see this section's top comment), each with its own Customer
+   *  Code/Short Name. Order preserved from the source data (already
+   *  alphabetical by country in distributors.js). */
+  function _distributorsForCountry(country) {
+    return distributorDatabase.filter(r => r.country === country);
+  }
+
+  /** Fills the Claim Market <select>(s) — Step 1's #claimMarket AND Claim
+   *  Monitor Edit Details' #editMarket, so the two forms never drift apart
+   *  — from whichever distributor dataset is currently live. Called once
+   *  on page load (against the fallback snapshot, so the form is usable
+   *  immediately) and again the moment distributors.js finishes loading
+   *  (see loadDistributorDatabase()), at which point it silently upgrades
+   *  to the live list — a market/country the user already had selected
+   *  stays selected as long as it still exists in the new data. */
+  function populateClaimMarketOptions() {
+    const markets = _marketList();
+    [{ id: 'claimMarket', placeholder: 'Select Region...' }, { id: 'editMarket', placeholder: 'Select Region...' }].forEach(({ id, placeholder }) => {
+      const sel = document.getElementById(id);
+      if (!sel) return;
+      const prevValue = sel.value;
+      sel.innerHTML = `<option value="" disabled ${prevValue ? '' : 'selected'}>${placeholder}</option>`
+        + markets.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
+      if (prevValue && markets.includes(prevValue)) {
+        sel.value = prevValue;
+      }
+    });
+  }
 
   /* ═══════════════════════════════════════════════════════════════════
      PARTS DATABASE — loaded from parts.js (generated from DB_Master.xlsx)
@@ -2701,6 +2853,11 @@
     loadPartsDatabase();
     loadUsersDatabase();
     loadEvaluatesDatabase();
+    // Populate immediately against the fallback snapshot (never empty),
+    // then loadDistributorDatabase() silently upgrades to the live
+    // distributors.js data once it loads.
+    populateClaimMarketOptions();
+    loadDistributorDatabase();
     // Scoreboard is the default landing page now (was My Profile) —
     // skipHistory so this doesn't push a duplicate entry, then
     // replaceState seeds the correct initial history state for popstate.
@@ -2809,7 +2966,10 @@
     const countrySelect = document.getElementById('claimCountry');
     countrySelect.innerHTML = '<option value="" disabled selected>Select Country...</option>';
     countrySelect.disabled = false;
-    (countryDatabase[market] || []).forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; countrySelect.appendChild(o); });
+    _countriesForMarket(market).forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; countrySelect.appendChild(o); });
+    // Country changed (or was just reset) — whatever Distributor Name/
+    // Customer Code/Short Name was showing no longer applies.
+    resetDistributorFields();
   }
 
   /** Same idea as updateCountries(), for the Claim Monitor "Edit Details"
@@ -2823,12 +2983,70 @@
     const market = document.getElementById('editMarket').value;
     const countrySelect = document.getElementById('editCountry');
     countrySelect.innerHTML = '<option value="" disabled' + (preselect ? '' : ' selected') + '>Select Country...</option>';
-    (countryDatabase[market] || []).forEach(c => {
+    _countriesForMarket(market).forEach(c => {
       const o = document.createElement('option');
       o.value = c; o.textContent = c;
       if (preselect && c === preselect) o.selected = true;
       countrySelect.appendChild(o);
     });
+  }
+
+  /** Step 1 only (Edit Details has no Distributor Name field — Claim
+   *  Country is all it edits). Populates #claimDistributor from
+   *  _distributorsForCountry() for the just-picked country: value is the
+   *  Customer Code (the only field guaranteed unique per row — two rows
+   *  can share the exact same Distributor Name text, e.g. Japan's
+   *  D081MP/D081MR), label is "Distributor Name" or, if more than one row
+   *  shares that name, "Distributor Name (CustomerCode)" so they're still
+   *  distinguishable in the dropdown. Auto-selects (and fills Customer
+   *  Code/Short Name immediately) when the country has exactly one
+   *  distributor — most countries do — so the common case needs no extra
+   *  click. */
+  function updateDistributors() {
+    const country = document.getElementById('claimCountry').value;
+    const distSelect = document.getElementById('claimDistributor');
+    const rows = _distributorsForCountry(country);
+    const nameCounts = {};
+    rows.forEach(r => { nameCounts[r.distributorName] = (nameCounts[r.distributorName] || 0) + 1; });
+
+    distSelect.innerHTML = '<option value="" disabled selected>Select Distributor...</option>'
+      + rows.map(r => {
+          const label = nameCounts[r.distributorName] > 1 ? `${r.distributorName} (${r.customerCode})` : r.distributorName;
+          return `<option value="${escapeHtml(r.customerCode)}">${escapeHtml(label)}</option>`;
+        }).join('');
+    distSelect.disabled = rows.length === 0;
+
+    document.getElementById('claimCustomerCode').value = '';
+    document.getElementById('claimDistShortName').value = '';
+
+    if (rows.length === 1) {
+      distSelect.value = rows[0].customerCode;
+      updateDistributorDetails();
+    }
+  }
+
+  /** Fills the read-only Customer Code / Distributor Short Name fields
+   *  from whichever row's customerCode matches the just-picked
+   *  #claimDistributor value — see updateDistributors()' comment for why
+   *  Customer Code (not Distributor Name) is the select's value. */
+  function updateDistributorDetails() {
+    const country = document.getElementById('claimCountry').value;
+    const customerCode = document.getElementById('claimDistributor').value;
+    const row = _distributorsForCountry(country).find(r => r.customerCode === customerCode);
+    document.getElementById('claimCustomerCode').value = row ? row.customerCode : '';
+    document.getElementById('claimDistShortName').value = row ? (row.shortName || '') : '';
+  }
+
+  /** Resets Distributor Name/Customer Code/Short Name back to their
+   *  "please pick a country" state — called whenever Country changes (or
+   *  Market changes and clears Country with it) so a stale distributor
+   *  from the PREVIOUS country can never linger on screen or get
+   *  submitted. */
+  function resetDistributorFields() {
+    const distSelect = document.getElementById('claimDistributor');
+    if (distSelect) { distSelect.innerHTML = '<option value="" disabled selected>Please select country first...</option>'; distSelect.disabled = true; }
+    const codeEl = document.getElementById('claimCustomerCode'); if (codeEl) codeEl.value = '';
+    const shortEl = document.getElementById('claimDistShortName'); if (shortEl) shortEl.value = '';
   }
 
   function generateSerialInputs(qty) {
@@ -2963,6 +3181,16 @@
         ? matchedUsers.map(u => u.email).join(';')
         : (issuerEmail || 'qc_tanachit@maco.co.th');   // last-resort fixed address
 
+      // distributorName/customerCode/distributorShortName — NEW fields from
+      // the Distributor Name select added alongside Claim Market/Country
+      // (see updateDistributors()/updateDistributorDetails() and the
+      // DISTRIBUTOR / COUNTRY / MARKET DATABASE comment near
+      // FALLBACK_DISTRIBUTOR_DATABASE). Each needs (a) a matching
+      // SharePoint column, and (b) that column added to whatever "Select"
+      // action builds claims.js — same requirement every field in this
+      // app needs, skipping it is what causes the "saved fine, reads back
+      // missing" class of bug seen before (meetingDate, the Verify Claim
+      // row highlight, ...).
       const claimData = {
         subject:         document.getElementById('claimSubject').value,
         source:          document.getElementById('claimSource').value,
@@ -2970,6 +3198,10 @@
         typeAir:         document.getElementById('typeAir').value,
         market:          document.getElementById('claimMarket').value,
         country:         document.getElementById('claimCountry').value,
+        distributorName:      (_distributorsForCountry(document.getElementById('claimCountry').value)
+                                  .find(r => r.customerCode === document.getElementById('claimDistributor').value) || {}).distributorName || '',
+        customerCode:         document.getElementById('claimCustomerCode').value,
+        distributorShortName: document.getElementById('claimDistShortName').value,
         modelName:       document.getElementById('modelName').value       || "N/A",
         serialNumbers:   serialNumbers.join(', ')                         || "N/A",
         partName:        document.getElementById('partName').value        || "N/A",
