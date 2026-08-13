@@ -379,6 +379,31 @@
           <textarea id="probDetail" class="form-control" required placeholder="Describe details..."></textarea>
         </div>
 
+        <!-- Defect Category — Main Defect -> Defect Detail -> Code Defect,
+             sourced from DB Master.xlsx's MainDefectMaster/SubDefectMaster
+             tables (same cascading-select + auto-fill pattern as Step 1's
+             Claim Market -> Claim Country -> Distributor Name — see
+             loadDefectDatabase()/updateDefectDetails()/updateCodeDefect()
+             and that section's own comment for the full field mapping). -->
+        <div class="form-row" style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed var(--border);">
+          <div class="form-group">
+            <label>Main Defect</label>
+            <select id="mainDefect" class="form-control" onchange="updateDefectDetails()">
+              <option value="" disabled selected>Loading defect categories...</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Defect Detail</label>
+            <select id="defectDetail" class="form-control" disabled onchange="updateCodeDefect()">
+              <option value="" disabled selected>Please select Main Defect first...</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Code Defect</label>
+            <input type="text" id="codeDefect" class="form-control" readonly placeholder="Auto-filled from Defect Detail">
+          </div>
+        </div>
+
         <div class="form-group" style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed var(--border);">
           <label>Attach Claim Pictures (Unlimited)</label>
           <input type="file" id="claimImagesInput" class="form-control" multiple accept="image/png, image/jpeg, image/jpg" style="background: var(--white); cursor: pointer;" onchange="handleClaimImagePreviews(this)">
@@ -1739,6 +1764,84 @@
   }
 
   /* ═══════════════════════════════════════════════════════════════════
+     DEFECT CATEGORY DATABASE — Step 1's Main Defect -> Defect Detail ->
+     Code Defect cascade, loaded from defects.js (expected to be generated
+     from the SAME DB_Master.xlsx parts.js already reads, per request —
+     two tables:
+       MainDefectMaster: column A = main_defect_id, column B = main_defect_en
+       SubDefectMaster:  column A = code (this table's own row id — this
+                         becomes the "Code Defect" field), column B =
+                         main_defect_id (FK into MainDefectMaster — this is
+                         what Defect Detail filters by), column D =
+                         sub_defect_detail_clean (the "Defect Detail" text)
+     Expected globals from defects.js:
+       MAIN_DEFECT_DATABASE : [{ id, mainDefectEn }, ...]
+       SUB_DEFECT_DATABASE  : [{ code, mainDefectId, subDefectDetailClean }, ...]
+     (column A of MainDefectMaster is ASSUMED to be its id/primary key,
+     since only column B was specified for display — if that's wrong,
+     adjust MAIN_DEFECT_DATABASE's `id` field to whatever actually keys
+     into SubDefectMaster.main_defect_id.)
+     No fallback/seed data is embedded here (unlike distributors.js) since
+     the actual MainDefectMaster/SubDefectMaster rows were never available
+     to generate one from — the two selects below simply stay empty until
+     defects.js exists and loads successfully. ═══════════════════════════ */
+  let mainDefectDatabase = [];
+  let subDefectDatabase = [];
+
+  function loadDefectDatabase() {
+    loadDataScript('defects.js', ['MAIN_DEFECT_DATABASE', 'SUB_DEFECT_DATABASE']).then(({ MAIN_DEFECT_DATABASE, SUB_DEFECT_DATABASE }) => {
+      if (Array.isArray(MAIN_DEFECT_DATABASE)) mainDefectDatabase = MAIN_DEFECT_DATABASE;
+      if (Array.isArray(SUB_DEFECT_DATABASE)) subDefectDatabase = SUB_DEFECT_DATABASE;
+      if (mainDefectDatabase.length) {
+        console.log(`[defects.js] ✔ ${mainDefectDatabase.length} main defect(s), ${subDefectDatabase.length} sub-defect row(s) loaded`);
+      } else {
+        console.warn('[defects.js] ⚠ loaded but MAIN_DEFECT_DATABASE is empty/not found');
+      }
+      populateMainDefectOptions();
+    }).catch(e => {
+      console.warn('[defects.js] ⚠ could not load — Defect Category selects will stay empty until this file exists:', e);
+      populateMainDefectOptions();
+    });
+  }
+
+  function populateMainDefectOptions() {
+    const sel = document.getElementById('mainDefect');
+    if (!sel) return;
+    sel.innerHTML = mainDefectDatabase.length
+      ? '<option value="" disabled selected>Select Main Defect...</option>'
+        + mainDefectDatabase.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.mainDefectEn)}</option>`).join('')
+      : '<option value="" disabled selected>No defect data available (defects.js not found)</option>';
+  }
+
+  /** Main Defect changed — filter subDefectDatabase to rows whose
+   *  mainDefectId matches the selected Main Defect's id, and populate
+   *  Defect Detail with their subDefectDetailClean text. Option VALUE is
+   *  each row's own `code` (SubDefectMaster column A — already unique per
+   *  row), so Defect Detail's value doubles as the lookup key
+   *  updateCodeDefect() needs — same "value = the field everything else
+   *  keys off of" convention Step 1's Distributor Name select already
+   *  uses for Customer Code. */
+  function updateDefectDetails() {
+    const mainDefectId = document.getElementById('mainDefect').value;
+    const detailSelect = document.getElementById('defectDetail');
+    const rows = subDefectDatabase.filter(r => String(r.mainDefectId) === String(mainDefectId));
+
+    detailSelect.innerHTML = '<option value="" disabled selected>Select Defect Detail...</option>'
+      + rows.map(r => `<option value="${escapeHtml(r.code)}">${escapeHtml(r.subDefectDetailClean)}</option>`).join('');
+    detailSelect.disabled = rows.length === 0;
+
+    document.getElementById('codeDefect').value = '';
+  }
+
+  /** Defect Detail changed — fills the read-only Code Defect field from
+   *  the matching SubDefectMaster row's own code (column A). */
+  function updateCodeDefect() {
+    const code = document.getElementById('defectDetail').value;
+    const row = subDefectDatabase.find(r => String(r.code) === String(code));
+    document.getElementById('codeDefect').value = row ? row.code : '';
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
      PARTS DATABASE — loaded from parts.js (generated from DB_Master.xlsx)
      Expected globals from parts.js:
        PART_NAMES   : string[]               — sorted unique part name list (unused by search UI)
@@ -2860,6 +2963,7 @@
     // distributors.js data once it loads.
     populateClaimMarketOptions();
     loadDistributorDatabase();
+    loadDefectDatabase();
     // Scoreboard is the default landing page now (was My Profile) —
     // skipHistory so this doesn't push a duplicate entry, then
     // replaceState seeds the correct initial history state for popstate.
@@ -3204,6 +3308,14 @@
                                   .find(r => r.customerCode === document.getElementById('claimDistributor').value) || {}).distributorName || '',
         customerCode:         document.getElementById('claimCustomerCode').value,
         distributorShortName: document.getElementById('claimDistShortName').value,
+        // Defect Category — see loadDefectDatabase()'s comment for the
+        // MainDefectMaster/SubDefectMaster field mapping. mainDefect is
+        // resolved to its DISPLAY text (mainDefectEn), not the raw id,
+        // same "store the human-readable value" choice distributorName
+        // makes above.
+        mainDefect:   (mainDefectDatabase.find(d => String(d.id) === document.getElementById('mainDefect').value) || {}).mainDefectEn || '',
+        defectDetail: document.getElementById('defectDetail').selectedOptions[0]?.textContent || '',
+        codeDefect:   document.getElementById('codeDefect').value,
         modelName:       document.getElementById('modelName').value       || "N/A",
         serialNumbers:   serialNumbers.join(', ')                         || "N/A",
         partName:        document.getElementById('partName').value        || "N/A",
