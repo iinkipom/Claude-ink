@@ -9533,8 +9533,29 @@
       const resultLineRe = new RegExp(`\\[${type}\\s*${num}\\]\\s*(?:OK|NG)\\s*(?::\\s*[\\s\\S]*?)?\\s*(?=\\n\\n\\[(?:Corrective|Preventive)\\s*\\d+\\]|$)`, 'i');
       selectedClaimData.verificationData = verifDataRaw.replace(resultLineRe, '').replace(/\n{3,}/g, '\n\n').trim();
 
+      // Carry every field saveConsiderations() normally sends, even empty —
+      // same "never send a field this flow's Apply_to_each loops over as
+      // missing/undefined" fix as SAVE_VERIFICATION_URL's call right below
+      // already follows (verificationImagesBase64: [], etc.). This call
+      // used to send only {id, actionPlan, tabSave}, which crashed
+      // SmartQC-Save-Consideration-URL's Apply_to_each over
+      // considerationImagesBase64 with "the result ... is of type 'Null'.
+      // The result must be a valid array." — Apply_to_each can't iterate
+      // a field that was never in the request body at all. status is
+      // included too so this reset can't accidentally blank the claim's
+      // Status column if the flow's Update item writes it unconditionally.
       const considUrl = (SAVE_CONSIDERATIONS_URL && !SAVE_CONSIDERATIONS_URL.startsWith('PASTE_')) ? SAVE_CONSIDERATIONS_URL : SAVE_INVESTIGATION_URL;
-      await fetch(considUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: selectedClaimId.toString(), actionPlan: newApText, tabSave: 'considerations' }) });
+      await fetch(considUrl, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: selectedClaimId.toString(),
+          actionPlan: newApText,
+          status: (selectedClaimData && selectedClaimData.status) || 'QC Investigated',
+          tabSave: 'considerations',
+          considerationImagesBase64: [],
+          investigationImagesBase64: []
+        })
+      });
 
       await fetch(SAVE_VERIFICATION_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
