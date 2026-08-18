@@ -1151,7 +1151,7 @@
             <div class="sb-plaque-val sb-font-digit" id="sbTopCase">0</div>
           </div>
           <div class="sb-plaque top-low">
-            <div class="sb-plaque-label">Top Low<small>Lowest score this fiscal year</small></div>
+            <div class="sb-plaque-label">Top Low<small id="sbTopLowCase">Lowest score this fiscal year</small></div>
             <div class="sb-plaque-val sb-font-digit" id="sbTopLow">0</div>
           </div>
           <div class="sb-plaque perf">
@@ -6720,6 +6720,7 @@
     // ---- TOP CASE / TOP LOW (always fiscal-year-wide, regardless of view mode) ----
     let topCaseCount = 0;
     let topLowScore = null;
+    let topLowClaim = null; // the actual claim record holding topLowScore, so we can name it below
     claims.forEach(c => {
       const issueRaw = resolveField(c, ['issueDate', 'IssueDate'], '');
       if (getFiscalYear(issueRaw) !== fy) return;
@@ -6728,10 +6729,27 @@
       const total = Number(totalRaw);
       if (isNaN(total)) return;
       if (total === 50) topCaseCount++;
-      if (topLowScore === null || total < topLowScore) topLowScore = total;
+      if (topLowScore === null || total < topLowScore) { topLowScore = total; topLowClaim = c; }
     });
     setText('sbTopCase', topCaseCount);
     setText('sbTopLow', topLowScore === null ? '0' : topLowScore);
+    // Name the actual lowest-scoring case under the label — TotalScore only
+    // exists on CLOSED claims (see calculatePerformanceScore()/CloseClaim),
+    // so this stays "Lowest score this fiscal year" until at least one case
+    // has closed with a score in the active fiscal year.
+    const topLowCaseEl = document.getElementById('sbTopLowCase');
+    if (topLowCaseEl) {
+      if (topLowClaim) {
+        const caseId = topLowClaim.id || topLowClaim.ID || topLowClaim.Id || 'N/A';
+        const caseSubject = resolveField(topLowClaim, ['Subject', 'subject', 'title', 'Title'], '');
+        const label = `Case #${caseId}${caseSubject ? ' — ' + caseSubject : ''}`;
+        topLowCaseEl.textContent = label;
+        topLowCaseEl.title = label;
+      } else {
+        topLowCaseEl.textContent = 'Lowest score this fiscal year';
+        topLowCaseEl.removeAttribute('title');
+      }
+    }
     // Note: sbPerformance is set further below, once Point/Target totals
     // for the active view mode have been computed.
 
