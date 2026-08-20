@@ -1245,6 +1245,7 @@
 
         <div class="sb-modal-actions">
           <button type="button" class="sb-modal-cancel" onclick="closeHistoryModal()">Close</button>
+          <button type="button" class="btn btn-red" style="width:auto; padding:10px 20px;" onclick="showHistoryOnGraph()">📈 Show on Team Graph</button>
         </div>
       </div>
     </div>
@@ -1269,6 +1270,11 @@
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ffd9a0" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
               </button>
             </div>
+          </div>
+
+          <div id="tgHistoryBanner" class="tg-history-banner" style="display:none;">
+            <span>🕐 Viewing history — chart is not live data</span>
+            <button type="button" onclick="tgViewLive()">↩ Back to Live</button>
           </div>
 
           <div class="tg-chart-card">
@@ -7081,24 +7087,30 @@
 
   /** Reads the modal's date input + mode toggle and fills in the results
    *  section, or shows the placeholder when no date is picked yet. */
-  function renderHistoryResults() {
+  /** Parses the History modal's date input into a real Date, or null if
+   *  empty/invalid. new Date('yyyy-mm-dd') parses as UTC midnight, which
+   *  can land on the previous LOCAL day depending on timezone — built from
+   *  the parts instead so "the date the user picked" is exactly the date
+   *  used, here and by showHistoryOnGraph() below. */
+  function _pickedHistoryDate() {
     const dateInput = document.getElementById('sbHistoryDate');
+    const raw = dateInput ? dateInput.value : '';
+    if (!raw) return null;
+    const [y, m, d] = raw.split('-').map(Number);
+    const refDate = new Date(y, m - 1, d);
+    return isNaN(refDate) ? null : refDate;
+  }
+
+  function renderHistoryResults() {
     const placeholder = document.getElementById('sbHistoryPlaceholder');
     const results = document.getElementById('sbHistoryResults');
-    if (!dateInput) return;
 
-    const raw = dateInput.value; // yyyy-mm-dd from <input type="date">, or ''
-    if (!raw) {
+    const refDate = _pickedHistoryDate();
+    if (!refDate) {
       if (placeholder) placeholder.style.display = 'block';
       if (results) results.style.display = 'none';
       return;
     }
-    // new Date('yyyy-mm-dd') parses as UTC midnight, which can land on the
-    // previous LOCAL day depending on timezone — build it from the parts
-    // instead so "the date the user picked" is exactly the date used.
-    const [y, m, d] = raw.split('-').map(Number);
-    const refDate = new Date(y, m - 1, d);
-    if (isNaN(refDate)) return;
 
     const stats = computeHistoricalPeriodStats(refDate, sbHistoryMode);
 
@@ -7126,6 +7138,27 @@
     }
   }
 
+  /** "📈 Show on Team Graph" button in the History modal — drives the
+   *  Team Graph's actual line chart to the picked date/mode instead of
+   *  just showing numbers in this modal. Sets tgHistoryDate (read by
+   *  _computeTeamGraphData() below in place of "now"), syncs tgViewMode
+   *  to whatever period type was picked here, navigates to the Team
+   *  Graph page if not already there, and re-renders it. */
+  function showHistoryOnGraph() {
+    const refDate = _pickedHistoryDate();
+    if (!refDate) return; // no date picked yet — nothing to show
+
+    tgHistoryDate = refDate;
+    tgViewMode = sbHistoryMode;
+    document.querySelectorAll('#tgModeToggle .sb-mode-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === tgViewMode);
+    });
+
+    closeHistoryModal();
+    if (typeof showPage === 'function') showPage('teamGraph');
+    renderTeamGraph();
+  }
+
   /* ══════════════════════════════════════════════════════════════════════════
      TEAM GRAPH — Total Point vs Target Point, visualized as a horizontal
      grouped-bar chart. Reuses _buildPeriodBuckets() so the same
@@ -7139,10 +7172,26 @@
    *  Scoreboard page's sbViewMode. Not persisted — resets to month on reload. */
   let tgViewMode = 'month';
 
-  /** Switches the Team Graph's view mode and re-renders. */
+  /** When set (via the History modal's "📈 Show on Team Graph" button),
+   *  the chart anchors to THIS date instead of the real current date —
+   *  same period math, just aimed at the past. null = live/current data.
+   *  Not persisted — resets to live on reload. */
+  let tgHistoryDate = null;
+
+  /** Switches the Team Graph's view mode and re-renders. Deliberately does
+   *  NOT clear tgHistoryDate — switching Weekly/Monthly/Fiscal Year while
+   *  viewing history re-slices the SAME historical date at a different
+   *  granularity, rather than snapping back to live data. */
   function setGraphViewMode(mode) {
     if (!['week', 'month', 'fy'].includes(mode)) return;
     tgViewMode = mode;
+    renderTeamGraph();
+  }
+
+  /** "↩ Back to Live" — clears the history anchor and re-renders with the
+   *  real current date again. */
+  function tgViewLive() {
+    tgHistoryDate = null;
     renderTeamGraph();
   }
 
@@ -7158,7 +7207,7 @@
    *  accumulating trend across the weeks of a month or the months of a
    *  fiscal year, not each period's isolated total. */
   function _computeTeamGraphData() {
-    const now = new Date();
+    const now = tgHistoryDate || new Date(); // history anchor, if the user picked one — otherwise live "now"
     const targetPerCase = getTargetPerCase();
     const { count, labels, classify, heading, monthGroups } =
       (tgViewMode === 'fy') ? _buildFiscalYearWeeklyBuckets(now) : _buildPeriodBuckets(now, tgViewMode);
@@ -7201,6 +7250,9 @@
     document.querySelectorAll('#tgModeToggle .sb-mode-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.mode === tgViewMode);
     });
+
+    const bannerEl = document.getElementById('tgHistoryBanner');
+    if (bannerEl) bannerEl.style.display = tgHistoryDate ? 'flex' : 'none';
 
     const { labels, buckets, heading, monthGroups } = _computeTeamGraphData();
     const headingEl = document.getElementById('tgChartHeading');
