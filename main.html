@@ -1289,8 +1289,24 @@
               <svg id="tgChartSvg" class="tg-chart-svg" width="100%" height="100%" viewBox="0 0 900 400" preserveAspectRatio="none"></svg>
               <div class="tg-tooltip" id="tgTooltip"></div>
             </div>
+            <div class="tg-chart-hint">Click any point for a day-by-day breakdown</div>
           </div>
 
+        </div>
+      </div>
+    </div>
+
+    <!-- TEAM GRAPH DAY-DETAIL MODAL — click any chart point to open.
+         In Weekly view a point already IS one day, so this shows that
+         day's own claim-level detail; in Monthly/Fiscal Year view a point
+         is one WEEK, so this breaks it down day by day. -->
+    <div id="tgDayDetailModal" class="tg-day-modal-overlay" style="display:none;" onclick="if(event.target===this)closeTgDayDetailModal()">
+      <div class="tg-day-modal-card">
+        <h3 id="tgDayDetailTitle">—</h3>
+        <div class="tg-day-modal-sub">Point / Target / Cases closed, per day</div>
+        <div id="tgDayDetailBody"></div>
+        <div class="tg-day-modal-actions">
+          <button type="button" class="tg-day-modal-close" onclick="closeTgDayDetailModal()">Close</button>
         </div>
       </div>
     </div>
@@ -7206,11 +7222,22 @@
    *  bucket i, for both Point and Target — so the line chart reads as an
    *  accumulating trend across the weeks of a month or the months of a
    *  fiscal year, not each period's isolated total. */
+  /** The exact `now` anchor and monthGroups used by the CHART currently on
+   *  screen — stashed here so a later click on one of its points can
+   *  reconstruct that same bucket's real date range (see
+   *  _teamGraphDateRangeForBucket() below) without redoing the anchor
+   *  logic (tgHistoryDate || new Date()) a second time and risking it
+   *  drifting from what's actually drawn. */
+  let _tgRenderNow = null;
+  let _tgRenderMonthGroups = null;
+
   function _computeTeamGraphData() {
     const now = tgHistoryDate || new Date(); // history anchor, if the user picked one — otherwise live "now"
+    _tgRenderNow = now;
     const targetPerCase = getTargetPerCase();
     const { count, labels, classify, heading, monthGroups } =
       (tgViewMode === 'fy') ? _buildFiscalYearWeeklyBuckets(now) : _buildPeriodBuckets(now, tgViewMode);
+    _tgRenderMonthGroups = monthGroups || null;
     const buckets = Array.from({ length: count }, () => ({ point: 0, target: 0 }));
 
     const claims = (typeof ACTIVE_CLAIMS_DATABASE !== 'undefined' && Array.isArray(ACTIVE_CLAIMS_DATABASE))
@@ -7259,6 +7286,107 @@
     if (headingEl) headingEl.textContent = heading;
 
     _renderTeamGraphLineChart(labels, buckets, monthGroups);
+  }
+
+  /** Reconstructs the real calendar day(s) a given chart point (bucket
+   *  index) covers, using the SAME anchor/monthGroups the chart was just
+   *  drawn with (_tgRenderNow/_tgRenderMonthGroups) and the SAME
+   *  week-of-month convention _buildPeriodBuckets()/
+   *  _buildFiscalYearWeeklyBuckets() already build their buckets with
+   *  (days 1-7 = week1, 8-14 = week2, ... — see _weekOfMonth()), so the
+   *  range returned here always matches what actually landed in that
+   *  point's cumulative total.
+   *    'week'  mode: a point IS one day  -> returns that single Date.
+   *    'month' mode: a point is one week -> returns that week's Dates.
+   *    'fy'    mode: a point is one week (within a month) -> same, but
+   *                  the month is looked up via monthGroups first. */
+  function _teamGraphDateRangeForBucket(bucketIndex) {
+    const now = _tgRenderNow || new Date();
+
+    if (tgViewMode === 'week') {
+      const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+      return [new Date(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate() + bucketIndex)];
+    }
+
+    let year, month, weekIdx;
+    if (tgViewMode === 'fy') {
+      const monthGroups = _tgRenderMonthGroups || [];
+      const mIdx = monthGroups.findIndex(g => bucketIndex >= g.startIndex && bucketIndex <= g.endIndex);
+      if (mIdx < 0) return [];
+      const { start } = _fiscalYearBounds(now);
+      const monthDate = new Date(start.getFullYear(), start.getMonth() + mIdx, 1);
+      year = monthDate.getFullYear(); month = monthDate.getMonth();
+      weekIdx = bucketIndex - monthGroups[mIdx].startIndex;
+    } else { // 'month'
+      year = now.getFullYear(); month = now.getMonth();
+      weekIdx = bucketIndex;
+    }
+
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const startDay = weekIdx * 7 + 1;
+    const endDay = Math.min(daysInMonth, (weekIdx + 1) * 7);
+    const days = [];
+    for (let d = startDay; d <= endDay; d++) days.push(new Date(year, month, d));
+    return days;
+  }
+
+  function closeTgDayDetailModal() {
+    const modal = document.getElementById('tgDayDetailModal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  /** Opens the day-detail modal for one clicked chart point — a
+   *  per-day breakdown (Point/Target/closed cases) of whatever real
+   *  calendar day(s) that point's cumulative total was built from. */
+  function openTeamGraphDayDetail(bucketIndex) {
+    const days = _teamGraphDateRangeForBucket(bucketIndex);
+    if (!days.length) return;
+
+    const targetPerCase = getTargetPerCase();
+    const claims = (typeof ACTIVE_CLAIMS_DATABASE !== 'undefined' && Array.isArray(ACTIVE_CLAIMS_DATABASE))
+      ? ACTIVE_CLAIMS_DATABASE
+      : (Array.isArray(activeClaimsList) ? activeClaimsList : []);
+    const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+    const rows = days.map(day => {
+      let point = 0, target = 0, closedCount = 0, closedLabels = [];
+      claims.forEach(c => {
+        const issueDate = _toDateOrNull(resolveField(c, ['issueDate', 'IssueDate'], ''));
+        if (issueDate && sameDay(issueDate, day)) target += targetPerCase;
+        const closeDate = _toDateOrNull(resolveField(c, ['closeDate', 'CloseDate'], ''));
+        if (closeDate && sameDay(closeDate, day)) {
+          const totalRaw = resolveField(c, ['totalScore', 'TotalScore'], '');
+          const total = Number(totalRaw);
+          if (!isNaN(total) && totalRaw !== '') {
+            point += total;
+            closedCount++;
+            closedLabels.push(`#${c.id || c.ID || '?'}:${total}`);
+          }
+        }
+      });
+      return { day, point, target, closedCount, closedLabels };
+    });
+
+    const titleEl = document.getElementById('tgDayDetailTitle');
+    if (titleEl) {
+      titleEl.textContent = days.length === 1
+        ? days[0].toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+        : `${days[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${days[days.length - 1].toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    }
+
+    const bodyEl = document.getElementById('tgDayDetailBody');
+    if (bodyEl) {
+      bodyEl.innerHTML = rows.map(r => `
+        <div class="tg-day-row${(r.closedCount || r.target) ? '' : ' empty'}">
+          <span class="tg-day-date">${escapeHtml(r.day.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }))}</span>
+          <span class="tg-day-stat pt">${r.point}pt</span>
+          <span class="tg-day-stat tg">${r.target}tg</span>
+          <span class="tg-day-stat cases">${r.closedCount} closed${r.closedLabels.length ? ' — ' + escapeHtml(r.closedLabels.join(', ')) : ''}</span>
+        </div>`).join('');
+    }
+
+    const modal = document.getElementById('tgDayDetailModal');
+    if (modal) modal.style.display = 'flex';
   }
 
   /** Builds a smooth Catmull-Rom-style curve through a list of {x,y}
@@ -7484,14 +7612,21 @@
       svg.querySelectorAll('.tg-dot').forEach(d => d.classList.remove('is-active'));
       if (tooltip) tooltip.style.opacity = '0';
     }
-    svg.onmousemove = (e) => {
+    // Shared with the click handler below, so "closest point" always
+    // means the same thing whether hovering or clicking.
+    const nearestIndexTo = (e) => {
       const rect = svg.getBoundingClientRect();
       const relX = (e.clientX - rect.left) / rect.width * W;
       let nearest = 0, best = Infinity;
       pointPts.forEach((p, i) => { const d = Math.abs(p.x - relX); if (d < best) { best = d; nearest = i; } });
-      showAt(nearest);
+      return nearest;
     };
+    svg.onmousemove = (e) => showAt(nearestIndexTo(e));
     svg.onmouseleave = hideScrub;
+    // Click any point (or anywhere along the chart — snaps to the
+    // nearest point, same as hover) to open a day-by-day breakdown of
+    // whatever real date range that point represents.
+    svg.onclick = (e) => openTeamGraphDayDetail(nearestIndexTo(e));
   }
 
 
