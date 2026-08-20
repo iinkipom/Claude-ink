@@ -2834,6 +2834,7 @@ textarea.form-control {
 .tg-day-date { font-weight: 700; }
 .tg-day-stat.pt { font-family: 'Orbitron', var(--font-body); color: #ffd9a0; font-weight: 800; }
 .tg-day-stat.tg { font-family: 'Orbitron', var(--font-body); color: #a3d4ff; font-weight: 800; }
+.tg-day-stat small { font-family: var(--font-body); font-weight: 600; opacity: 0.6; font-size: 10px; }
 .tg-day-stat.cases { color: rgba(255,255,255,0.6); font-size: 11.5px; overflow-wrap: anywhere; }
 .tg-day-empty-note { color: rgba(255,255,255,0.5); font-size: 13px; text-align: center; padding: 20px 0; }
 .tg-day-modal-actions { display: flex; justify-content: flex-end; margin-top: 16px; }

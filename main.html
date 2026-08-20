@@ -1303,7 +1303,7 @@
     <div id="tgDayDetailModal" class="tg-day-modal-overlay" style="display:none;" onclick="if(event.target===this)closeTgDayDetailModal()">
       <div class="tg-day-modal-card">
         <h3 id="tgDayDetailTitle">—</h3>
-        <div class="tg-day-modal-sub">Point / Target / Cases closed, per day</div>
+        <div class="tg-day-modal-sub">Running Point / Target total (matches the chart line) — small numbers are that day's own contribution</div>
         <div id="tgDayDetailBody"></div>
         <div class="tg-day-modal-actions">
           <button type="button" class="tg-day-modal-close" onclick="closeTgDayDetailModal()">Close</button>
@@ -7230,6 +7230,13 @@
    *  drifting from what's actually drawn. */
   let _tgRenderNow = null;
   let _tgRenderMonthGroups = null;
+  /** The cumulative {point, target} PER BUCKET the chart is currently
+   *  showing — i.e. exactly what each of its points reads on the Y axis.
+   *  Used by openTeamGraphDayDetail() below to carry in the running total
+   *  from before the clicked bucket, so its day rows show the SAME
+   *  cumulative Point/Target the chart line is plotting, not each day's
+   *  isolated total. */
+  let _tgRenderBuckets = null;
 
   function _computeTeamGraphData() {
     const now = tgHistoryDate || new Date(); // history anchor, if the user picked one — otherwise live "now"
@@ -7268,6 +7275,7 @@
       cumTarget += b.target;
       return { point: cumPoint, target: cumTarget };
     });
+    _tgRenderBuckets = cumulativeBuckets;
 
     return { labels, buckets: cumulativeBuckets, heading, monthGroups };
   }
@@ -7348,23 +7356,36 @@
       : (Array.isArray(activeClaimsList) ? activeClaimsList : []);
     const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
+    // Carry in the running total from BEFORE this bucket — same value the
+    // chart's own cumulative line already sits at going into this point
+    // (_tgRenderBuckets[bucketIndex-1], or 0 at the very first bucket) —
+    // so each row below reads as a running total, and the LAST row always
+    // equals _tgRenderBuckets[bucketIndex], exactly what the chart plots
+    // for the point that was clicked. Per-day figures were "how many
+    // points that day scored", which didn't reconcile with the chart's
+    // own cumulative line and read as disconnected numbers.
+    const carry = (bucketIndex > 0 && _tgRenderBuckets && _tgRenderBuckets[bucketIndex - 1])
+      ? _tgRenderBuckets[bucketIndex - 1] : { point: 0, target: 0 };
+    let runningPoint = carry.point, runningTarget = carry.target;
+
     const rows = days.map(day => {
-      let point = 0, target = 0, closedCount = 0, closedLabels = [];
+      let dayPoint = 0, dayTarget = 0, closedCount = 0, closedLabels = [];
       claims.forEach(c => {
         const issueDate = _toDateOrNull(resolveField(c, ['issueDate', 'IssueDate'], ''));
-        if (issueDate && sameDay(issueDate, day)) target += targetPerCase;
+        if (issueDate && sameDay(issueDate, day)) dayTarget += targetPerCase;
         const closeDate = _toDateOrNull(resolveField(c, ['closeDate', 'CloseDate'], ''));
         if (closeDate && sameDay(closeDate, day)) {
           const totalRaw = resolveField(c, ['totalScore', 'TotalScore'], '');
           const total = Number(totalRaw);
           if (!isNaN(total) && totalRaw !== '') {
-            point += total;
+            dayPoint += total;
             closedCount++;
             closedLabels.push(`#${c.id || c.ID || '?'}:${total}`);
           }
         }
       });
-      return { day, point, target, closedCount, closedLabels };
+      runningPoint += dayPoint; runningTarget += dayTarget;
+      return { day, point: runningPoint, target: runningTarget, dayPoint, dayTarget, closedCount, closedLabels };
     });
 
     const titleEl = document.getElementById('tgDayDetailTitle');
@@ -7377,10 +7398,10 @@
     const bodyEl = document.getElementById('tgDayDetailBody');
     if (bodyEl) {
       bodyEl.innerHTML = rows.map(r => `
-        <div class="tg-day-row${(r.closedCount || r.target) ? '' : ' empty'}">
+        <div class="tg-day-row${(r.closedCount || r.dayTarget) ? '' : ' empty'}">
           <span class="tg-day-date">${escapeHtml(r.day.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }))}</span>
-          <span class="tg-day-stat pt">${r.point}pt</span>
-          <span class="tg-day-stat tg">${r.target}tg</span>
+          <span class="tg-day-stat pt">${r.point}pt${r.dayPoint ? ` <small>(+${r.dayPoint})</small>` : ''}</span>
+          <span class="tg-day-stat tg">${r.target}tg${r.dayTarget ? ` <small>(+${r.dayTarget})</small>` : ''}</span>
           <span class="tg-day-stat cases">${r.closedCount} closed${r.closedLabels.length ? ' — ' + escapeHtml(r.closedLabels.join(', ')) : ''}</span>
         </div>`).join('');
     }
