@@ -2026,45 +2026,77 @@
     return new Promise((resolve, reject) => {
       const iframe = document.createElement('iframe');
       iframe.style.display = 'none';
-      document.body.appendChild(iframe);
+      // Explicit about:blank navigation, then WAIT for it to actually
+      // finish (the 'load' event) before ever touching the iframe's
+      // document. The old version appended the iframe and immediately
+      // called document.write() on it in the same tick, without the
+      // iframe ever completing a real navigation of its own first. Recent
+      // Edge/Chrome builds have started treating that half-initialized
+      // iframe as its own unresolved "unique file: origin", and then
+      // block the very <script src="claims.js"> subresource load this
+      // function exists to make, with:
+      //   "Unsafe attempt to load URL file:///...main.html from frame
+      //    with URL file:///...main.html — 'file:' URLs are treated as
+      //    unique security origins."
+      // (this app is opened from a file:// network path, not a web
+      // server, so this bites here specifically). Giving the iframe a
+      // real about:blank navigation up front, and waiting for it to
+      // settle, lets it properly inherit this page's origin before we
+      // write into it — avoiding that block without touching fetch()
+      // (still unusable for file:// — see below) or any caller of this
+      // function.
+      iframe.src = 'about:blank';
 
       const cleanup = () => { try { document.body.removeChild(iframe); } catch (_) {} };
 
-      const idoc = iframe.contentDocument || iframe.contentWindow.document;
-      idoc.open();
-      idoc.write('<!DOCTYPE html><html><head></head><body></body></html>');
-      idoc.close();
+      const runLoad = () => {
+        const idoc = iframe.contentDocument || iframe.contentWindow.document;
+        idoc.open();
+        idoc.write('<!DOCTYPE html><html><head></head><body></body></html>');
+        idoc.close();
 
-      const script = idoc.createElement('script');
-      // Absolute URL, resolved against the MAIN page's location — the
-      // iframe's own about:blank document has no meaningful base URL of
-      // its own to resolve a relative path against.
-      script.src = new URL(url + '?t=' + Date.now(), location.href).href;
-      script.onload = () => {
-        // IMPORTANT: const/let top-level declarations do NOT become
-        // properties of the window object (only var does) — so
-        // `iframe.contentWindow.ACTIVE_CLAIMS_DATABASE` would be
-        // undefined even though the const declared it successfully.
-        // Fix: run a second INLINE script in the SAME iframe document —
-        // it shares the exact same top-level lexical scope as the file
-        // that just loaded (both scripts live in the same document/
-        // window), so it can reference the const-declared variable
-        // directly and copy it onto `window` as a real property, which
-        // *is* then visible from the parent page via contentWindow.
-        const bridge = idoc.createElement('script');
-        bridge.textContent = varNames.map(v => `try { window.${v} = ${v}; } catch (e) {}`).join('\n');
-        idoc.body.appendChild(bridge); // inline scripts run synchronously on append
+        const script = idoc.createElement('script');
+        // Absolute URL, resolved against the MAIN page's location — the
+        // iframe's own about:blank document has no meaningful base URL of
+        // its own to resolve a relative path against.
+        script.src = new URL(url + '?t=' + Date.now(), location.href).href;
+        script.onload = () => {
+          // IMPORTANT: const/let top-level declarations do NOT become
+          // properties of the window object (only var does) — so
+          // `iframe.contentWindow.ACTIVE_CLAIMS_DATABASE` would be
+          // undefined even though the const declared it successfully.
+          // Fix: run a second INLINE script in the SAME iframe document —
+          // it shares the exact same top-level lexical scope as the file
+          // that just loaded (both scripts live in the same document/
+          // window), so it can reference the const-declared variable
+          // directly and copy it onto `window` as a real property, which
+          // *is* then visible from the parent page via contentWindow.
+          const bridge = idoc.createElement('script');
+          bridge.textContent = varNames.map(v => `try { window.${v} = ${v}; } catch (e) {}`).join('\n');
+          idoc.body.appendChild(bridge); // inline scripts run synchronously on append
 
-        const result = {};
-        varNames.forEach(v => { result[v] = iframe.contentWindow[v]; });
-        cleanup();
-        resolve(result);
+          const result = {};
+          varNames.forEach(v => { result[v] = iframe.contentWindow[v]; });
+          cleanup();
+          resolve(result);
+        };
+        script.onerror = () => {
+          cleanup();
+          reject(new Error('Failed to load ' + url));
+        };
+        idoc.body.appendChild(script);
       };
-      script.onerror = () => {
-        cleanup();
-        reject(new Error('Failed to load ' + url));
-      };
-      idoc.body.appendChild(script);
+
+      // Some browsers finish the about:blank navigation synchronously
+      // (readyState is already 'complete' by the time we can check) — in
+      // that case 'load' will never fire again, so run immediately rather
+      // than waiting forever. Otherwise wait for the real event.
+      if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
+        runLoad();
+      } else {
+        iframe.addEventListener('load', runLoad, { once: true });
+      }
+      document.body.appendChild(iframe);
     });
   }
 
