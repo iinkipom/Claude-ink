@@ -1067,6 +1067,9 @@
               <button type="button" class="sb-mode-btn active" data-mode="month" onclick="setScoreboardViewMode('month')">Monthly</button>
               <button type="button" class="sb-mode-btn" data-mode="fy" onclick="setScoreboardViewMode('fy')">Fiscal Year</button>
             </div>
+            <button type="button" class="sb-gear-btn" onclick="openHistoryModal()" title="Check a past period's stats">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ffd9a0" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+            </button>
             <button type="button" class="sb-gear-btn" id="sbTargetConfigBtn" onclick="openTargetConfigModal()" title="Configure Target per case" style="display:none;">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ffd9a0" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
             </button>
@@ -1208,6 +1211,44 @@
         </div>
       </div>
     </div>
+
+    <!-- HISTORY MODAL — pick any past date, see that period's stats.
+         Shared by Scoreboard and Team Graph (both open the same modal). -->
+    <div id="sbHistoryModal" class="sb-modal-overlay" style="display:none;" onclick="if(event.target===this)closeHistoryModal()">
+      <div class="sb-modal-card" style="max-width:480px;">
+        <h3>Check a Past Period</h3>
+        <p>Pick any date and a period type — this shows the Cases Issued, Cases Closed, Total Point, Target Point and Performance for the period (Week/Month/Fiscal Year) that date falls in, computed fresh from the current claim data.</p>
+
+        <label for="sbHistoryDate">Date to look up</label>
+        <input type="date" id="sbHistoryDate" class="form-control" onchange="renderHistoryResults()" />
+
+        <div class="sb-mode-toggle" id="sbHistoryModeToggle" style="margin-top:14px; display:inline-flex;">
+          <button type="button" class="sb-mode-btn" data-mode="week" onclick="setHistoryMode('week')" style="color:var(--charcoal-soft);">Weekly</button>
+          <button type="button" class="sb-mode-btn active" data-mode="month" onclick="setHistoryMode('month')" style="color:var(--charcoal-soft);">Monthly</button>
+          <button type="button" class="sb-mode-btn" data-mode="fy" onclick="setHistoryMode('fy')" style="color:var(--charcoal-soft);">Fiscal Year</button>
+        </div>
+
+        <div id="sbHistoryPlaceholder" style="margin-top:18px; font-size:13.5px; color:var(--charcoal-soft);">Pick a date above to see that period's stats.</div>
+
+        <div id="sbHistoryResults" style="display:none; margin-top:18px;">
+          <div style="font-weight:800; font-size:13.5px; color:var(--charcoal); margin-bottom:12px;" id="sbHistoryHeading">—</div>
+          <div class="sb-history-stats-grid">
+            <div class="sb-history-stat"><span class="v" id="sbHistIssued">0</span><span class="k">Case Issued</span></div>
+            <div class="sb-history-stat"><span class="v" id="sbHistClosed">0</span><span class="k">Case Closed</span></div>
+            <div class="sb-history-stat"><span class="v" id="sbHistPoint">0</span><span class="k">Total Point</span></div>
+            <div class="sb-history-stat"><span class="v" id="sbHistTarget">0</span><span class="k">Target Point</span></div>
+            <div class="sb-history-stat"><span class="v" id="sbHistPerf">—</span><span class="k">Performance</span></div>
+            <div class="sb-history-stat"><span class="v" id="sbHistTopCase">0</span><span class="k">Top Case (50pt)</span></div>
+          </div>
+          <div style="margin-top:12px; font-size:12.5px; color:var(--charcoal-soft);" id="sbHistTopLow"></div>
+        </div>
+
+        <div class="sb-modal-actions">
+          <button type="button" class="sb-modal-cancel" onclick="closeHistoryModal()">Close</button>
+        </div>
+      </div>
+    </div>
+
     <div id="pagTeamGraph" class="page-body sb-page" style="display:none;">
       <div class="sb-board">
         <div class="sb-board-inner">
@@ -1224,6 +1265,9 @@
                 <button type="button" class="sb-mode-btn active" data-mode="month" onclick="setGraphViewMode('month')">Monthly</button>
                 <button type="button" class="sb-mode-btn" data-mode="fy" onclick="setGraphViewMode('fy')">Fiscal Year</button>
               </div>
+              <button type="button" class="sb-gear-btn" onclick="openHistoryModal()" title="Check a past period's stats">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ffd9a0" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+              </button>
             </div>
           </div>
 
@@ -6951,6 +6995,135 @@
     if (errEl) errEl.style.display = 'none';
     closeTargetConfigModal();
     renderScoreboard();
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     HISTORY LOOKUP — "how many cases/points did we have on <past date>?"
+     Both Scoreboard and Team Graph only ever show the CURRENT week/month/
+     fiscal year. Everything they show (Cases Issued, Cases Closed, Total
+     Point, Target Point, Performance) is derived entirely from fields
+     already timestamped per-claim in claims.js (issueDate, closeDate,
+     totalScore) — nothing about those facts changes after the fact, so
+     the exact same math the live pages already run for "now" can be
+     re-run for ANY reference date instead, using the SAME
+     _buildPeriodBuckets()/getTargetPerCase()/resolveField() helpers those
+     pages already rely on. This is a read-only lookup (its own modal,
+     opened from either page) rather than making the live pages
+     themselves date-scrollable, so the live clock/roster/chart keep
+     behaving exactly as before — nothing about them changed. ══════════ */
+
+  /** Scoreboard/Team Graph History modal's own period-type toggle
+   *  ('week'|'month'|'fy'). Independent of sbViewMode/tgViewMode. */
+  let sbHistoryMode = 'month';
+
+  function openHistoryModal() {
+    const modal = document.getElementById('sbHistoryModal');
+    if (modal) modal.style.display = 'flex';
+    renderHistoryResults(); // reflects whatever date/mode was left from last time
+  }
+
+  function closeHistoryModal() {
+    const modal = document.getElementById('sbHistoryModal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  function setHistoryMode(mode) {
+    if (!['week', 'month', 'fy'].includes(mode)) return;
+    sbHistoryMode = mode;
+    document.querySelectorAll('#sbHistoryModeToggle .sb-mode-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+    renderHistoryResults();
+  }
+
+  /** Computes the same family of stats renderScoreboard() shows for "now",
+   *  but for the period (of the given mode) containing refDate. Top
+   *  Case/Top Low are scoped to refDate's OWN fiscal year (not today's),
+   *  matching how they're already fiscal-year-wide on the live board —
+   *  just anchored to the chosen date instead of the real current date. */
+  function computeHistoricalPeriodStats(refDate, mode) {
+    const targetPerCase = getTargetPerCase();
+    const { classify, heading } = _buildPeriodBuckets(refDate, mode);
+    const claims = (typeof ACTIVE_CLAIMS_DATABASE !== 'undefined' && Array.isArray(ACTIVE_CLAIMS_DATABASE))
+      ? ACTIVE_CLAIMS_DATABASE
+      : (Array.isArray(activeClaimsList) ? activeClaimsList : []);
+
+    let issued = 0, closed = 0, point = 0, target = 0;
+    claims.forEach(c => {
+      const issueDate = _toDateOrNull(resolveField(c, ['issueDate', 'IssueDate'], ''));
+      if (issueDate && classify(issueDate) >= 0) { issued++; target += targetPerCase; }
+      const closeDate = _toDateOrNull(resolveField(c, ['closeDate', 'CloseDate'], ''));
+      if (closeDate && classify(closeDate) >= 0) {
+        closed++;
+        const totalRaw = resolveField(c, ['totalScore', 'TotalScore'], '');
+        const total = Number(totalRaw);
+        if (!isNaN(total) && totalRaw !== '') point += total;
+      }
+    });
+
+    const histFy = getFiscalYear(refDate);
+    let topCaseCount = 0, topLowScore = null, topLowClaim = null;
+    claims.forEach(c => {
+      const issueRaw = resolveField(c, ['issueDate', 'IssueDate'], '');
+      if (getFiscalYear(issueRaw) !== histFy) return;
+      const totalRaw = resolveField(c, ['totalScore', 'TotalScore'], '');
+      if (totalRaw === '' || totalRaw === 'N/A') return;
+      const total = Number(totalRaw);
+      if (isNaN(total)) return;
+      if (total === 50) topCaseCount++;
+      if (topLowScore === null || total < topLowScore) { topLowScore = total; topLowClaim = c; }
+    });
+
+    const perfPct = target > 0 ? Math.round((point / target) * 100) : null;
+
+    return { heading, issued, closed, point, target, perfPct, topCaseCount, topLowScore, topLowClaim, fiscalYear: histFy };
+  }
+
+  /** Reads the modal's date input + mode toggle and fills in the results
+   *  section, or shows the placeholder when no date is picked yet. */
+  function renderHistoryResults() {
+    const dateInput = document.getElementById('sbHistoryDate');
+    const placeholder = document.getElementById('sbHistoryPlaceholder');
+    const results = document.getElementById('sbHistoryResults');
+    if (!dateInput) return;
+
+    const raw = dateInput.value; // yyyy-mm-dd from <input type="date">, or ''
+    if (!raw) {
+      if (placeholder) placeholder.style.display = 'block';
+      if (results) results.style.display = 'none';
+      return;
+    }
+    // new Date('yyyy-mm-dd') parses as UTC midnight, which can land on the
+    // previous LOCAL day depending on timezone — build it from the parts
+    // instead so "the date the user picked" is exactly the date used.
+    const [y, m, d] = raw.split('-').map(Number);
+    const refDate = new Date(y, m - 1, d);
+    if (isNaN(refDate)) return;
+
+    const stats = computeHistoricalPeriodStats(refDate, sbHistoryMode);
+
+    if (placeholder) placeholder.style.display = 'none';
+    if (results) results.style.display = 'block';
+
+    const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    setText('sbHistoryHeading', stats.heading);
+    setText('sbHistIssued', stats.issued);
+    setText('sbHistClosed', stats.closed);
+    setText('sbHistPoint', stats.point);
+    setText('sbHistTarget', stats.target);
+    setText('sbHistPerf', stats.perfPct === null ? '—' : `${stats.perfPct}%`);
+    setText('sbHistTopCase', stats.topCaseCount);
+
+    const topLowEl = document.getElementById('sbHistTopLow');
+    if (topLowEl) {
+      if (stats.topLowClaim) {
+        const caseId = stats.topLowClaim.id || stats.topLowClaim.ID || stats.topLowClaim.Id || 'N/A';
+        const caseSubject = resolveField(stats.topLowClaim, ['Subject', 'subject', 'title', 'Title'], '');
+        topLowEl.textContent = `Top Low (FY${stats.fiscalYear}): ${stats.topLowScore} pts — Case #${caseId}${caseSubject ? ' — ' + caseSubject : ''}`;
+      } else {
+        topLowEl.textContent = `Top Low (FY${stats.fiscalYear}): no scored case yet`;
+      }
+    }
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
