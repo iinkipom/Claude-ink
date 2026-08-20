@@ -1998,105 +1998,90 @@
   /* ── USERS DATABASE — loaded from users.js ──────────────────────────────
      Loaded once on DOMContentLoaded. submitClaim() reads USER_DATABASE
      to build the emailTo recipient list at submit time.                  */
-  /** Shared safe loader for claims.js / users.js / Evaluates.js / parts.js.
+  /** Shared safe loader for claims.js / users.js / Evaluates.js / parts.js /
+   *  distributors.js / defects.js.
    *
-   *  All four files declare their data with `const NAME = ...;` at the top
-   *  level. Loading them via a <script src="..."> tag injected into the
-   *  MAIN page puts those declarations in the page's global scope, which
-   *  is shared across every script tag on the page — so a second load of
-   *  the exact same file (Refresh Data button, revisiting a page, etc.)
-   *  throws a silent "Identifier 'X' has already been declared" error.
-   *  The script's onload still fires (the resource loaded fine), but its
-   *  code never actually runs, so the app is stuck on stale data forever.
+   *  All of these files declare their data with `const NAME = ...;` at the
+   *  top level. Loading one via a plain <script src="..."> tag on the MAIN
+   *  page works fine the FIRST time, but a second load of the exact same
+   *  file (Refresh Data button, revisiting a page, etc.) throws a silent
+   *  "Identifier 'X' has already been declared" error — <script> tags on
+   *  one document all share the same top-level lexical scope, and once a
+   *  const is declared there it can never be re-declared for the rest of
+   *  that document's lifetime, no matter how many times the old <script>
+   *  element is removed/replaced. The script's onload still fires (the
+   *  resource loaded fine), but its code never actually runs, so the app
+   *  is stuck on stale data forever.
    *
-   *  Fix: load the script inside a throwaway hidden <iframe> instead of
-   *  the main page. Each iframe has its OWN separate global scope, so
-   *  const/let declared inside it can never collide with the main page
-   *  or with any previous iframe — every call gets a truly fresh
-   *  environment. Deliberately NOT using fetch(): this app is opened
-   *  directly from a local file:// path (a network drive), and Chrome
-   *  blocks fetch() for file:// URLs entirely (CORS) — a real <script>
-   *  tag is the only thing that reliably loads local files here, exactly
-   *  like the original code did; this just isolates where it runs.
+   *  This used to be solved by loading each file inside a throwaway hidden
+   *  <iframe> instead — each iframe has its own separate global scope, so
+   *  every call got a truly fresh environment to declare into. That relied
+   *  on the iframe inheriting this page's file:// origin. Recent Edge/
+   *  Chrome builds have started rejecting a <script src="claims.js">
+   *  subresource load inside such an iframe with:
+   *    "Unsafe attempt to load URL file:///...main.html from frame with
+   *     URL file:///...main.html — 'file:' URLs are treated as unique
+   *     security origins."
+   *  (confirmed still happening for claims.js even after giving the
+   *  iframe an explicit about:blank navigation first) — since this app is
+   *  opened directly from a file:// network path, not a web server, this
+   *  iframe-isolation trick can no longer be trusted at all here.
+   *
+   *  Fix: stop using an iframe. Load straight into the MAIN document (the
+   *  exact same, already-proven-reliable technique this page uses for its
+   *  own inline scripts — no frame, no fetch(), no CORS involved at all)
+   *  the FIRST time any given url is requested this page-load, and cache
+   *  that url as loaded. If loadDataScript() is ever called again for a
+   *  url already loaded this page-load (i.e. a "Refresh Data" action),
+   *  re-declaring its const in the same document is impossible to do
+   *  safely — so instead this does a full location.reload(), which gives
+   *  a genuinely fresh document (and therefore fresh const bindings) the
+   *  same way opening/revisiting the page normally would. Deliberately
+   *  NOT using fetch(): this app is opened directly from a local file://
+   *  path, and Chrome blocks fetch() for file:// URLs entirely (CORS) — a
+   *  real <script> tag is the only thing that reliably loads local files
+   *  here.
    *
    *  Returns an object with whichever of the requested variable names the
    *  script actually defined (each will be `undefined` if that file
-   *  doesn't declare it, e.g. requesting PART_NO_NAME from claims.js). */
+   *  doesn't declare it, e.g. requesting PART_NO_NAME from claims.js). On
+   *  a reload-triggered call the returned promise never settles (the page
+   *  navigates away before it could matter). */
+  const _loadedDataScriptUrls = new Set();
   function loadDataScript(url, varNames) {
     return new Promise((resolve, reject) => {
-      const iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      // Explicit about:blank navigation, then WAIT for it to actually
-      // finish (the 'load' event) before ever touching the iframe's
-      // document. The old version appended the iframe and immediately
-      // called document.write() on it in the same tick, without the
-      // iframe ever completing a real navigation of its own first. Recent
-      // Edge/Chrome builds have started treating that half-initialized
-      // iframe as its own unresolved "unique file: origin", and then
-      // block the very <script src="claims.js"> subresource load this
-      // function exists to make, with:
-      //   "Unsafe attempt to load URL file:///...main.html from frame
-      //    with URL file:///...main.html — 'file:' URLs are treated as
-      //    unique security origins."
-      // (this app is opened from a file:// network path, not a web
-      // server, so this bites here specifically). Giving the iframe a
-      // real about:blank navigation up front, and waiting for it to
-      // settle, lets it properly inherit this page's origin before we
-      // write into it — avoiding that block without touching fetch()
-      // (still unusable for file:// — see below) or any caller of this
-      // function.
-      iframe.src = 'about:blank';
-
-      const cleanup = () => { try { document.body.removeChild(iframe); } catch (_) {} };
-
-      const runLoad = () => {
-        const idoc = iframe.contentDocument || iframe.contentWindow.document;
-        idoc.open();
-        idoc.write('<!DOCTYPE html><html><head></head><body></body></html>');
-        idoc.close();
-
-        const script = idoc.createElement('script');
-        // Absolute URL, resolved against the MAIN page's location — the
-        // iframe's own about:blank document has no meaningful base URL of
-        // its own to resolve a relative path against.
-        script.src = new URL(url + '?t=' + Date.now(), location.href).href;
-        script.onload = () => {
-          // IMPORTANT: const/let top-level declarations do NOT become
-          // properties of the window object (only var does) — so
-          // `iframe.contentWindow.ACTIVE_CLAIMS_DATABASE` would be
-          // undefined even though the const declared it successfully.
-          // Fix: run a second INLINE script in the SAME iframe document —
-          // it shares the exact same top-level lexical scope as the file
-          // that just loaded (both scripts live in the same document/
-          // window), so it can reference the const-declared variable
-          // directly and copy it onto `window` as a real property, which
-          // *is* then visible from the parent page via contentWindow.
-          const bridge = idoc.createElement('script');
-          bridge.textContent = varNames.map(v => `try { window.${v} = ${v}; } catch (e) {}`).join('\n');
-          idoc.body.appendChild(bridge); // inline scripts run synchronously on append
-
-          const result = {};
-          varNames.forEach(v => { result[v] = iframe.contentWindow[v]; });
-          cleanup();
-          resolve(result);
-        };
-        script.onerror = () => {
-          cleanup();
-          reject(new Error('Failed to load ' + url));
-        };
-        idoc.body.appendChild(script);
-      };
-
-      // Some browsers finish the about:blank navigation synchronously
-      // (readyState is already 'complete' by the time we can check) — in
-      // that case 'load' will never fire again, so run immediately rather
-      // than waiting forever. Otherwise wait for the real event.
-      if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
-        runLoad();
-      } else {
-        iframe.addEventListener('load', runLoad, { once: true });
+      if (_loadedDataScriptUrls.has(url)) {
+        location.reload();
+        return; // page is navigating away — this promise deliberately never settles
       }
-      document.body.appendChild(iframe);
+
+      const script = document.createElement('script');
+      // Absolute URL, resolved against this page's own location.
+      script.src = new URL(url + '?t=' + Date.now(), location.href).href;
+      script.onload = () => {
+        // IMPORTANT: const/let top-level declarations do NOT become
+        // properties of the window object (only var does) — so
+        // `window.ACTIVE_CLAIMS_DATABASE` would be undefined even though
+        // the const declared it successfully. Fix: run a second INLINE
+        // script right after it — it shares the exact same top-level
+        // lexical scope (both are plain <script> tags on this document),
+        // so it can reference the const-declared variable directly and
+        // copy it onto `window` as a real property.
+        const bridge = document.createElement('script');
+        bridge.textContent = varNames.map(v => `try { window.${v} = ${v}; } catch (e) {}`).join('\n');
+        document.body.appendChild(bridge); // inline scripts run synchronously on append
+        try { document.body.removeChild(bridge); } catch (_) {}
+
+        _loadedDataScriptUrls.add(url);
+        const result = {};
+        varNames.forEach(v => { result[v] = window[v]; });
+        resolve(result);
+      };
+      script.onerror = () => {
+        try { document.body.removeChild(script); } catch (_) {}
+        reject(new Error('Failed to load ' + url));
+      };
+      document.body.appendChild(script);
     });
   }
 
@@ -2125,8 +2110,9 @@
          FollowingClaimStatus, AnalysisRootCauseofTrouble,
          CorrespondenceClaimCase, DiscussionForFollowingClaimCase,
          InformationToConcernShop, ... }
-     Uses loadDataScript() (isolated iframe) rather than a <script> tag on
-     the main page — see that function's comment for why. Re-renders the
+     Uses loadDataScript() (see its own comment for the current file://-safe
+     technique) rather than a plain <script> tag directly on this page.
+     Re-renders the
      currently active radar period once the file loads, since the initial
      render on page load happens before this async load can possibly
      finish. */
@@ -6511,8 +6497,8 @@
 
   /** Loads claims.js (if not already loaded) and re-renders the Scoreboard
    *  once available; does NOT touch claimsTableBody. Uses loadDataScript()
-   *  (isolated iframe) rather than a <script> tag on the main page — see
-   *  that function's comment for why. */
+   *  (see its own comment for the current file://-safe technique) rather
+   *  than a plain <script> tag directly on this page. */
   function loadClaimsForScoreboard() {
     if (typeof ACTIVE_CLAIMS_DATABASE !== 'undefined' && Array.isArray(ACTIVE_CLAIMS_DATABASE) && ACTIVE_CLAIMS_DATABASE.length) {
       activeClaimsList = ACTIVE_CLAIMS_DATABASE;
@@ -8660,9 +8646,14 @@
      but any second load (Refresh Data button, revisiting this page)
      silently threw "Identifier 'ACTIVE_CLAIMS_DATABASE' has already been
      declared", leaving the table stuck on stale data forever.
-     loadDataScript()'s isolated iframe fixes that while still using a
-     real <script> tag under the hood — which matters because this app is
-     opened from a local file:// path, where fetch() is blocked entirely. */
+     loadDataScript() handles that: the first ever call this page-load
+     loads claims.js normally; any call after that (i.e. this function
+     running again — Refresh Data button, revisiting this page) instead
+     does a full location.reload(), since re-declaring that const in the
+     same document safely isn't possible — see loadDataScript()'s own
+     comment for why. This still relies on a real <script> tag under the
+     hood rather than fetch(), because this app is opened from a local
+     file:// path, where fetch() is blocked entirely. */
   async function fetchClaims(){
     const tbody=document.getElementById('claimsTableBody');
     tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:30px;">Refreshing claims from Microsoft List...</td></tr>';
