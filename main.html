@@ -271,22 +271,19 @@
         <h3 class="form-section-title">Product & Part Details</h3>
         <div class="form-group">
           <label>Model Name</label>
-          <select class="form-control" onchange="toggleField('wrapModelName', this.value !== 'N/A')">
+          <select id="hasModelToggle" class="form-control" onchange="toggleModelSection(this.value !== 'N/A')">
             <option value="N/A" selected>N/A</option><option value="Have">Have Model Name</option>
           </select>
-          <div id="wrapModelName" class="dynamic-input-wrap hidden">
-            <input type="text" id="modelName" class="form-control" placeholder="Enter Model Name">
+          <!-- One .model-block per Model — Model Name + its OWN Quantity of
+               Serial Numbers + that many serial inputs, added via +Add
+               Model. See addModelBlock()/removeModelBlock()/
+               _renumberModelBlocks() and submitClaim()'s comment on how
+               this becomes modelName (multi-line) + serialNumbers
+               ([Model N: value] lines) at submit time. -->
+          <div id="wrapModelSection" class="dynamic-input-wrap hidden">
+            <div id="modelBlocksContainer" class="model-blocks-container"></div>
+            <button type="button" class="btn-add-model" onclick="addModelBlock()">+ Add Model</button>
           </div>
-        </div>
-        <div class="form-group">
-          <label>Quantity of Serial Numbers</label>
-          <select class="form-control" onchange="generateSerialInputs(this.value)">
-            <option value="0" selected>0</option><option value="1">1</option><option value="2">2</option>
-            <option value="3">3</option><option value="4">4</option><option value="5">5</option>
-            <option value="6">6</option><option value="7">7</option><option value="8">8</option>
-            <option value="9">9</option><option value="10">10</option>
-          </select>
-          <div id="wrapSerialNumbers" class="serial-grid"></div>
         </div>
         <div class="form-row">
           <!-- Part No. — user types here first to search -->
@@ -437,8 +434,8 @@
           <div class="claim-summary-item"><label>Subject</label><div id="monSubject">Loading...</div></div>
           <div class="claim-summary-item"><label>Source / Market</label><div id="monSource">Loading...</div></div>
           <div class="claim-summary-item"><label>Type Air Conditioners</label><div id="montypeAir">Loading...</div></div>
-          <div class="claim-summary-item"><label>Model</label><div id="monModel" style="color:var(--red);">Loading...</div></div>
-          <div class="claim-summary-item"><label>Serial Number</label><div id="monSerial" style="color:var(--red);">Loading...</div></div>
+          <div class="claim-summary-item"><label>Model</label><div id="monModel" style="color:var(--red); white-space:pre-line;">Loading...</div></div>
+          <div class="claim-summary-item"><label>Serial Number</label><div id="monSerial" style="color:var(--red); white-space:pre-line;">Loading...</div></div>
           <div class="claim-summary-item"><label>Part Info</label><div id="monPart">Loading...</div></div>
           <div class="claim-summary-item">
             <label>Dates</label>
@@ -836,8 +833,8 @@
 
                   <div class="claim-summary-item"><label>Subject</label><div id="evalSubject">—</div></div>
                   <div class="claim-summary-item"><label>Type Air Conditioner</label><div id="evalTypeAir">—</div></div>
-                  <div class="claim-summary-item"><label>Model</label><div id="evalModel" style="color:var(--red);">—</div></div>
-                  <div class="claim-summary-item"><label>Serial Number</label><div id="evalSerial" style="color:var(--red);">—</div></div>
+                  <div class="claim-summary-item"><label>Model</label><div id="evalModel" style="color:var(--red); white-space:pre-line;">—</div></div>
+                  <div class="claim-summary-item"><label>Serial Number</label><div id="evalSerial" style="color:var(--red); white-space:pre-line;">—</div></div>
                   <div class="claim-summary-item"><label>Part Info</label><div id="evalPart">—</div></div>
 
                   <div class="claim-summary-item">
@@ -1341,9 +1338,9 @@
             <table style="width:100%; border-collapse:collapse; margin-bottom:12px; font-size:10px;">
               <tr>
                 <th style="background:#EDEDED; border:1px solid #171717; padding:5px 7px; text-align:left; width:18%;">Model</th>
-                <td id="pdfModel" style="border:1px solid #171717; padding:5px 7px; width:32%;"></td>
+                <td id="pdfModel" style="border:1px solid #171717; padding:5px 7px; width:32%; white-space:pre-line;"></td>
                 <th style="background:#EDEDED; border:1px solid #171717; padding:5px 7px; text-align:left; width:18%;">Serial Number</th>
-                <td id="pdfSerial" style="border:1px solid #171717; padding:5px 7px; width:32%;"></td>
+                <td id="pdfSerial" style="border:1px solid #171717; padding:5px 7px; width:32%; white-space:pre-line;"></td>
               </tr>
               <tr>
                 <th style="background:#EDEDED; border:1px solid #171717; padding:5px 7px; text-align:left;">Problem Part Name</th>
@@ -1421,6 +1418,29 @@
   // Investigation, reports, ...) — skipping that step is exactly what
   // causes the "saved fine, reads back missing" class of bug this app has
   // hit repeatedly (meetingDate, the Verify Claim row highlight, ...).
+  //
+  // Model Name / Serial Numbers (multi-model support — added per request,
+  // "+Add for addition model ... Model Name No.1 -> Quantity of Serial
+  // Numbers for Model No.1 -> Serial No.1 for Model No.1"): Step 1's
+  // Model Name section is now a repeater (see addModelBlock()/
+  // generateModelSerialInputs() and submitClaim()'s own comment on this),
+  // one block per model, each with its own Quantity-of-Serial-Numbers.
+  // Both fields are now MULTI-LINE strings, not single values —
+  //   modelName:     one Model Name per line, in block order
+  //                  e.g. "DXK09ZSA-WF1\nSRK20YXP-W"
+  //   serialNumbers: one "[Model N: value]" line per serial number, where
+  //                  N is that serial's model's 1-based position (i.e.
+  //                  which LINE of modelName it belongs to — NOT the
+  //                  typed model name text itself, so two models with the
+  //                  same typed name still resolve unambiguously)
+  //                  e.g. "[Model 1: 557611159CF]\n[Model 1: 557611159CG]\n[Model 2: ABC123]"
+  // For these to land correctly, the matching SharePoint columns for
+  // BOTH ModelName and SerialNumbers need to be changed from "Single line
+  // of text" to "Multiple lines of text" (plain text, not rich text) —
+  // otherwise SharePoint will silently flatten/truncate the line breaks.
+  // Anywhere this app DISPLAYS these two fields (Claim Monitor, PDF
+  // report, Evaluate) should render them with line breaks preserved
+  // (e.g. CSS white-space:pre-line) rather than as flattened one-liners.
   const CLAIM_SUBMIT_URL    = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/2ec9a8be48184c1d879cf92732f3931e/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=P8_UCocRwFhbHJPNYl1bDliQTgpta6CJ_QcB6ddfw9s";
   const SAVE_INVESTIGATION_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/b3ef405d3d6a46dba91ab63eaf98bb71/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=9IiYnbL80DtRGn6C-tsPeOl1G38ImgmwuQV2GRPnh1Y";
   const SAVE_FINDING_RISK_URL  = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/aa0cd16f30094734aafb0a03823597e1/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=5gh7GRMm45XHHAMfELhzqRYVajc8fg8tjCmb93w--Os";
@@ -3589,10 +3609,101 @@
     const shortEl = document.getElementById('editDistShortName'); if (shortEl) shortEl.value = '';
   }
 
-  function generateSerialInputs(qty) {
-    const container = document.getElementById('wrapSerialNumbers'); container.innerHTML = "";
+  /* ── STEP 1: MODEL / SERIAL NUMBER BLOCKS ────────────────────────────────
+     Replaces the old single Model Name + flat Quantity-of-Serial-Numbers
+     pair (which had no link between a serial and which model it belonged
+     to) with a repeatable "model block": Model Name No.N -> Quantity of
+     Serial Numbers for Model No.N -> that many Serial No. inputs, added
+     via +Add Model. Each block gets a stable internal uid (for wiring
+     its own inputs/select), but the NUMBER shown to the user (and used
+     as the submit-time key — see submitClaim()) is always its current
+     1-based position in the DOM, recomputed by _renumberModelBlocks()
+     after every add/remove — so removing block #2 out of 3 doesn't leave
+     a gap; the remaining two simply become #1/#2. */
+  let _modelBlockUid = 0;
+
+  function toggleModelSection(show) {
+    toggleField('wrapModelSection', show);
+    // Land on at least one block the first time this is opened, so the
+    // user doesn't have to click "+Add Model" just to get started.
+    if (show && document.querySelectorAll('#modelBlocksContainer .model-block').length === 0) {
+      addModelBlock();
+    }
+  }
+
+  function addModelBlock() {
+    const container = document.getElementById('modelBlocksContainer');
+    if (!container) return;
+    const uid = ++_modelBlockUid;
+    const block = document.createElement('div');
+    block.className = 'model-block';
+    block.dataset.blockUid = String(uid);
+    block.innerHTML = `
+      <div class="model-block-head">
+        <span class="model-block-title"></span>
+        <button type="button" class="model-block-remove" onclick="removeModelBlock(${uid})">✕ Remove</button>
+      </div>
+      <div class="form-group">
+        <label class="model-name-label"></label>
+        <input type="text" class="form-control model-name-input" placeholder="Enter Model Name">
+      </div>
+      <div class="form-group">
+        <label class="model-qty-label"></label>
+        <select class="form-control model-serial-qty" onchange="generateModelSerialInputs(${uid}, this.value)">
+          <option value="0" selected>0</option><option value="1">1</option><option value="2">2</option>
+          <option value="3">3</option><option value="4">4</option><option value="5">5</option>
+          <option value="6">6</option><option value="7">7</option><option value="8">8</option>
+          <option value="9">9</option><option value="10">10</option>
+        </select>
+        <div class="serial-grid model-serial-grid"></div>
+      </div>`;
+    container.appendChild(block);
+    _renumberModelBlocks();
+  }
+
+  function removeModelBlock(uid) {
+    const block = document.querySelector(`#modelBlocksContainer .model-block[data-block-uid="${uid}"]`);
+    if (block) block.remove();
+    _renumberModelBlocks();
+  }
+
+  /** Refreshes every block's visible "Model No.N" labels/title (and the
+   *  Remove button's visibility) to match its CURRENT position in the
+   *  DOM. Never touches any input's typed value — purely a relabel. */
+  function _renumberModelBlocks() {
+    const blocks = document.querySelectorAll('#modelBlocksContainer .model-block');
+    blocks.forEach((block, i) => {
+      const n = i + 1;
+      const titleEl = block.querySelector('.model-block-title');
+      const nameLabel = block.querySelector('.model-name-label');
+      const qtyLabel = block.querySelector('.model-qty-label');
+      const nameInput = block.querySelector('.model-name-input');
+      const removeBtn = block.querySelector('.model-block-remove');
+      if (titleEl) titleEl.textContent = `Model No.${n}`;
+      if (nameLabel) nameLabel.textContent = `Model Name No.${n}`;
+      if (qtyLabel) qtyLabel.textContent = `Quantity of Serial Numbers for Model No.${n}`;
+      if (nameInput) nameInput.placeholder = `Enter Model Name No.${n}`;
+      // Always allow removing — even down to zero blocks; addModelBlock()
+      // (via toggleModelSection) puts one back if the user re-opens with
+      // none left. Only hide it when this is the SOLE block, so there's
+      // always an obvious way to add a first one instead of an empty
+      // "Remove" with nothing to add back except toggling N/A off and on.
+      if (removeBtn) removeBtn.style.display = blocks.length > 1 ? '' : 'none';
+    });
+  }
+
+  function generateModelSerialInputs(uid, qty) {
+    const block = document.querySelector(`#modelBlocksContainer .model-block[data-block-uid="${uid}"]`);
+    if (!block) return;
+    const container = block.querySelector('.model-serial-grid');
+    container.innerHTML = "";
+    const n = Array.from(document.querySelectorAll('#modelBlocksContainer .model-block')).indexOf(block) + 1;
     for (let i = 1; i <= qty; i++) {
-      const input = document.createElement('input'); input.type='text'; input.className='form-control serial-input'; input.placeholder='Serial No. '+i; input.required=true; container.appendChild(input);
+      const input = document.createElement('input');
+      input.type = 'text'; input.className = 'form-control model-serial-input';
+      input.placeholder = `Serial No.${i} for Model No.${n}`;
+      input.required = true;
+      container.appendChild(input);
     }
   }
 
@@ -3689,8 +3800,38 @@
     submitBtn.innerText = "Packaging Files & Submitting..."; submitBtn.disabled = true;
 
     try {
-      const serialInputs = document.querySelectorAll('.serial-input'); let serialNumbers = [];
-      serialInputs.forEach(input => serialNumbers.push(input.value));
+      // Model Name / Serial Numbers — built from the .model-block repeater
+      // (see addModelBlock()/generateModelSerialInputs()) rather than the
+      // old single Model Name + flat serial list, so a serial number can
+      // be tied back to which model it belongs to.
+      //   modelName     -> multi-line text, one Model Name per line, in
+      //                    the SAME order the blocks are shown in — this
+      //                    needs the matching SharePoint column changed
+      //                    to "Multiple lines of text" (was single line).
+      //   serialNumbers -> multi-line text, one "[Model N: value]" line
+      //                    per serial number — N is that serial's
+      //                    model's 1-based position (matching the Nth
+      //                    line of modelName above), NOT the typed model
+      //                    name itself, so two models sharing an
+      //                    identical typed name still resolve unambiguously.
+      // Both stay "N/A" when the Model Name toggle above is at N/A,
+      // regardless of any values left over in hidden blocks.
+      let modelName = 'N/A', serialNumbers = 'N/A';
+      if (document.getElementById('hasModelToggle').value !== 'N/A') {
+        const modelNameLines = [];
+        const serialNumberLines = [];
+        document.querySelectorAll('#modelBlocksContainer .model-block').forEach((block, i) => {
+          const n = i + 1;
+          const nameVal = (block.querySelector('.model-name-input')?.value || '').trim();
+          if (nameVal) modelNameLines.push(nameVal);
+          block.querySelectorAll('.model-serial-input').forEach(si => {
+            const v = (si.value || '').trim();
+            if (v) serialNumberLines.push(`[Model ${n}: ${v}]`);
+          });
+        });
+        if (modelNameLines.length) modelName = modelNameLines.join('\n');
+        if (serialNumberLines.length) serialNumbers = serialNumberLines.join('\n');
+      }
       const imagesBase64 = await getBase64ObjectArray(claimImageFiles);
       const docsBase64   = await getBase64ObjectArray(claimDocFiles);
 
@@ -3750,8 +3891,8 @@
         mainDefect:   (mainDefectDatabase.find(d => String(d.id) === document.getElementById('mainDefect').value) || {}).mainDefectEn || '',
         defectDetail: document.getElementById('defectDetail').selectedOptions[0]?.textContent || '',
         codeDefect:   document.getElementById('codeDefect').value,
-        modelName:       document.getElementById('modelName').value       || "N/A",
-        serialNumbers:   serialNumbers.join(', ')                         || "N/A",
+        modelName:       modelName,
+        serialNumbers:   serialNumbers,
         partName:        document.getElementById('partName').value        || "N/A",
         partNo:          document.getElementById('partNo').value          || "N/A",
         productionDate:  formatDate(document.getElementById('prodDate').value),
@@ -3774,7 +3915,8 @@
       await fetch(CLAIM_SUBMIT_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(claimData) });
       alert("Claim Initiated! Background sync processing files & email notification.");
       document.getElementById('issueClaimForm').reset();
-      document.getElementById('wrapSerialNumbers').innerHTML = "";
+      document.getElementById('modelBlocksContainer').innerHTML = "";
+      document.getElementById('wrapModelSection').classList.add('hidden');
       document.querySelectorAll('.preview-grid').forEach(el => el.innerHTML = "");
       document.getElementById('claimDocPreviews').innerHTML = "";
       document.getElementById('periodWrap').style.display = 'none';
