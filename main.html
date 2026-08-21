@@ -1428,12 +1428,13 @@
   // Both fields are now MULTI-LINE strings, not single values —
   //   modelName:     one Model Name per line, in block order
   //                  e.g. "DXK09ZSA-WF1\nSRK20YXP-W"
-  //   serialNumbers: one "[Model N: value]" line per serial number, where
-  //                  N is that serial's model's 1-based position (i.e.
-  //                  which LINE of modelName it belongs to — NOT the
-  //                  typed model name text itself, so two models with the
-  //                  same typed name still resolve unambiguously)
-  //                  e.g. "[Model 1: 557611159CF]\n[Model 1: 557611159CG]\n[Model 2: ABC123]"
+  //   serialNumbers: one "[<Model Name>: value]" line per serial number —
+  //                  the key is that serial's OWN model's actual typed
+  //                  name (not a positional "Model N" placeholder), so it
+  //                  reads directly against modelName above. Falls back
+  //                  to "Model N" (N = that block's 1-based position)
+  //                  only if that particular model's name was left blank.
+  //                  e.g. "[DXK09ZSA-WF1: 557611159CF]\n[DXK09ZSA-WF1: 557611159CG]\n[SRK20YXP-W: ABC123]"
   // For these to land correctly, the matching SharePoint columns for
   // BOTH ModelName and SerialNumbers need to be changed from "Single line
   // of text" to "Multiple lines of text" (plain text, not rich text) —
@@ -3821,12 +3822,16 @@
         const modelNameLines = [];
         const serialNumberLines = [];
         document.querySelectorAll('#modelBlocksContainer .model-block').forEach((block, i) => {
-          const n = i + 1;
           const nameVal = (block.querySelector('.model-name-input')?.value || '').trim();
           if (nameVal) modelNameLines.push(nameVal);
+          // Key = the actual typed Model Name — falls back to "Model N"
+          // (N = this block's 1-based position) only if that model's own
+          // name was left blank, so a serial number is never recorded
+          // under an empty key.
+          const key = nameVal || `Model ${i + 1}`;
           block.querySelectorAll('.model-serial-input').forEach(si => {
             const v = (si.value || '').trim();
-            if (v) serialNumberLines.push(`[Model ${n}: ${v}]`);
+            if (v) serialNumberLines.push(`[${key}: ${v}]`);
           });
         });
         if (modelNameLines.length) modelName = modelNameLines.join('\n');
