@@ -521,11 +521,16 @@
           </div>
           <div class="form-group">
             <label>Model Name</label>
-            <input type="text" id="editModel" class="form-control" placeholder="Model Name or N/A">
-          </div>
-          <div class="form-group">
-            <label>Serial Numbers</label>
-            <input type="text" id="editSerial" class="form-control" placeholder="Serial numbers, comma separated">
+            <select id="editHasModelToggle" class="form-control" onchange="toggleEditModelSection(this.value !== 'N/A')">
+              <option value="N/A" selected>N/A</option><option value="Have">Have Model Name</option>
+            </select>
+            <!-- Same repeater as Step 1 (see addModelBlock()'s comment) —
+                 restored from the claim's saved data by
+                 restoreEditModelBlocks() in toggleClaimEditMode(). -->
+            <div id="editWrapModelSection" class="dynamic-input-wrap hidden">
+              <div id="editModelBlocksContainer" class="model-blocks-container"></div>
+              <button type="button" class="btn-add-model" onclick="addEditModelBlock()">+ Add Model</button>
+            </div>
           </div>
           <div class="form-row">
             <!-- Part No. — same search-then-autofill widget as Step 1
@@ -2558,6 +2563,128 @@
     selectEditPartNo(no, name || '');
   }
 
+  /* ── EDIT DETAILS: MODEL / SERIAL NUMBER BLOCKS ──────────────────────────
+     Same repeater as Step 1's addModelBlock()/generateModelSerialInputs()
+     — duplicated under edit* ids rather than shared, matching this
+     codebase's own established convention for Edit Details (see
+     updateEditDistributors() vs updateDistributors(), etc.) of keeping
+     Step 1 and Edit Details as separate-but-parallel implementations so
+     neither can accidentally affect the other. The two DO share their
+     actual data logic via _extractModelSerialData()/_parseModelSerialData()
+     above, which take the relevant element ids as arguments — only the
+     DOM-wiring layer here is duplicated. */
+  let _editModelBlockUid = 0;
+
+  function toggleEditModelSection(show) {
+    toggleField('editWrapModelSection', show);
+    if (show && document.querySelectorAll('#editModelBlocksContainer .model-block').length === 0) {
+      addEditModelBlock();
+    }
+  }
+
+  function addEditModelBlock() {
+    const container = document.getElementById('editModelBlocksContainer');
+    if (!container) return;
+    const uid = ++_editModelBlockUid;
+    const block = document.createElement('div');
+    block.className = 'model-block';
+    block.dataset.blockUid = String(uid);
+    block.innerHTML = `
+      <div class="model-block-head">
+        <span class="model-block-title"></span>
+        <button type="button" class="model-block-remove" onclick="removeEditModelBlock(${uid})">✕ Remove</button>
+      </div>
+      <div class="form-group">
+        <label class="model-name-label"></label>
+        <input type="text" class="form-control model-name-input" placeholder="Enter Model Name">
+      </div>
+      <div class="form-group">
+        <label class="model-qty-label"></label>
+        <select class="form-control model-serial-qty" onchange="generateEditModelSerialInputs(${uid}, this.value)">
+          <option value="0" selected>0</option><option value="1">1</option><option value="2">2</option>
+          <option value="3">3</option><option value="4">4</option><option value="5">5</option>
+          <option value="6">6</option><option value="7">7</option><option value="8">8</option>
+          <option value="9">9</option><option value="10">10</option>
+        </select>
+        <div class="serial-grid model-serial-grid"></div>
+      </div>`;
+    container.appendChild(block);
+    _renumberEditModelBlocks();
+    return uid; // used by restoreEditModelBlocks() to populate the block it just created
+  }
+
+  function removeEditModelBlock(uid) {
+    const block = document.querySelector(`#editModelBlocksContainer .model-block[data-block-uid="${uid}"]`);
+    if (block) block.remove();
+    _renumberEditModelBlocks();
+  }
+
+  function _renumberEditModelBlocks() {
+    const blocks = document.querySelectorAll('#editModelBlocksContainer .model-block');
+    blocks.forEach((block, i) => {
+      const n = i + 1;
+      const titleEl = block.querySelector('.model-block-title');
+      const nameLabel = block.querySelector('.model-name-label');
+      const qtyLabel = block.querySelector('.model-qty-label');
+      const nameInput = block.querySelector('.model-name-input');
+      const removeBtn = block.querySelector('.model-block-remove');
+      if (titleEl) titleEl.textContent = `Model No.${n}`;
+      if (nameLabel) nameLabel.textContent = `Model Name No.${n}`;
+      if (qtyLabel) qtyLabel.textContent = `Quantity of Serial Numbers for Model No.${n}`;
+      if (nameInput) nameInput.placeholder = `Enter Model Name No.${n}`;
+      if (removeBtn) removeBtn.style.display = blocks.length > 1 ? '' : 'none';
+    });
+  }
+
+  function generateEditModelSerialInputs(uid, qty) {
+    const block = document.querySelector(`#editModelBlocksContainer .model-block[data-block-uid="${uid}"]`);
+    if (!block) return;
+    const container = block.querySelector('.model-serial-grid');
+    container.innerHTML = "";
+    const n = Array.from(document.querySelectorAll('#editModelBlocksContainer .model-block')).indexOf(block) + 1;
+    for (let i = 1; i <= qty; i++) {
+      const input = document.createElement('input');
+      input.type = 'text'; input.className = 'form-control model-serial-input';
+      input.placeholder = `Serial No.${i} for Model No.${n}`;
+      input.required = true;
+      container.appendChild(input);
+    }
+  }
+
+  /** Rebuilds the Edit Details model repeater from a claim's saved
+   *  modelName/serialNumbers, via _parseModelSerialData() — called by
+   *  toggleClaimEditMode() each time Edit Details is opened. No blocks
+   *  parsed out (blank/"N/A" claim) leaves the toggle on N/A with the
+   *  section collapsed, same starting state as a brand-new claim. */
+  function restoreEditModelBlocks(modelNameRaw, serialNumbersRaw) {
+    const container = document.getElementById('editModelBlocksContainer');
+    if (container) container.innerHTML = '';
+    const toggle = document.getElementById('editHasModelToggle');
+    const blocks = _parseModelSerialData(modelNameRaw, serialNumbersRaw);
+
+    if (!blocks.length) {
+      if (toggle) toggle.value = 'N/A';
+      toggleField('editWrapModelSection', false);
+      return;
+    }
+
+    if (toggle) toggle.value = 'Have';
+    toggleField('editWrapModelSection', true);
+    blocks.forEach(b => {
+      const uid = addEditModelBlock();
+      const blockEl = document.querySelector(`#editModelBlocksContainer .model-block[data-block-uid="${uid}"]`);
+      if (!blockEl) return;
+      const nameInput = blockEl.querySelector('.model-name-input');
+      if (nameInput) nameInput.value = b.name;
+      const qtySelect = blockEl.querySelector('.model-serial-qty');
+      const qty = Math.min(10, b.serials.length); // dropdown tops out at 10, same as Step 1
+      if (qtySelect) qtySelect.value = String(qty);
+      generateEditModelSerialInputs(uid, qty);
+      const serialInputs = blockEl.querySelectorAll('.model-serial-input');
+      b.serials.slice(0, 10).forEach((v, i) => { if (serialInputs[i]) serialInputs[i].value = v; });
+    });
+  }
+
   const circledNumbers = ['➀','➁','➂','➃','➄','➅','➆','➇','➈','➉'];
 
   function cleanText(htmlString, defaultText = 'N/A') {
@@ -3660,6 +3787,7 @@
       </div>`;
     container.appendChild(block);
     _renumberModelBlocks();
+    return uid; // used by restoreEditModelBlocks() to populate the block it just created
   }
 
   function removeModelBlock(uid) {
@@ -3706,6 +3834,100 @@
       input.required = true;
       container.appendChild(input);
     }
+  }
+
+  /** Shared by submitClaim() (Step 1) and saveClaimEdit() (Claim Monitor
+   *  Edit Details) — walks a .model-block repeater's CURRENT DOM state
+   *  (given the toggle select's id and the blocks container's id, since
+   *  Step 1 and Edit Details each have their own separate set — see
+   *  CLAIM_SUBMIT_URL's comment for why they're kept parallel rather than
+   *  shared elements) and builds the modelName/serialNumbers pair:
+   *    modelName:     one Model Name per line, in block order
+   *    serialNumbers: one "[<model name>: value]" line per serial number
+   *                   — key = that serial's own model's typed name,
+   *                   falling back to "Model N" (this block's 1-based
+   *                   position) only if that model's name was left blank
+   *  Returns {modelName:'N/A', serialNumbers:'N/A'} whenever the toggle's
+   *  value is 'N/A', regardless of any values left over in hidden blocks. */
+  function _extractModelSerialData(hasModelToggleId, blocksContainerId) {
+    let modelName = 'N/A', serialNumbers = 'N/A';
+    const toggle = document.getElementById(hasModelToggleId);
+    if (toggle && toggle.value !== 'N/A') {
+      const modelNameLines = [];
+      const serialNumberLines = [];
+      document.querySelectorAll(`#${blocksContainerId} .model-block`).forEach((block, i) => {
+        const nameVal = (block.querySelector('.model-name-input')?.value || '').trim();
+        if (nameVal) modelNameLines.push(nameVal);
+        const key = nameVal || `Model ${i + 1}`;
+        block.querySelectorAll('.model-serial-input').forEach(si => {
+          const v = (si.value || '').trim();
+          if (v) serialNumberLines.push(`[${key}: ${v}]`);
+        });
+      });
+      if (modelNameLines.length) modelName = modelNameLines.join('\n');
+      if (serialNumberLines.length) serialNumbers = serialNumberLines.join('\n');
+    }
+    return { modelName, serialNumbers };
+  }
+
+  /** The inverse of _extractModelSerialData() — parses a claim's SAVED
+   *  modelName/serialNumbers back into [{name, serials:[...]}] blocks, so
+   *  Edit Details can restore its .model-block repeater from whatever a
+   *  claim already has. Handles three shapes, since claims saved before
+   *  this feature existed are still single-model with a flat comma list:
+   *    1. New format: modelName is one name per line; serialNumbers is
+   *       one "[<name or 'Model N'>: value]" line per serial — matches
+   *       _extractModelSerialData()'s own output exactly.
+   *    2. Pre-existing single-model claims: modelName is a plain string,
+   *       serialNumbers is a flat comma-separated list with no brackets
+   *       — every serial is assigned to that one model.
+   *    3. Blank / "N/A" modelName with no recognizable serials -> [].
+   *  A bracketed key that doesn't match any modelName line (or "Model N"
+   *  position) becomes its own trailing block using that key as the
+   *  model name, rather than being silently dropped — so re-saving after
+   *  opening Edit Details can never lose data this parser doesn't
+   *  recognize the shape of. */
+  function _parseModelSerialData(modelNameRaw, serialNumbersRaw) {
+    const isBlank = (s) => !s || !String(s).trim() || String(s).trim() === 'N/A';
+    const modelNames = isBlank(modelNameRaw)
+      ? []
+      : String(modelNameRaw).split('\n').map(s => s.trim()).filter(Boolean);
+
+    const blocks = modelNames.map(name => ({ name, serials: [] }));
+    const blockIndexByKey = new Map();
+    blocks.forEach((b, i) => {
+      blockIndexByKey.set(b.name, i);
+      blockIndexByKey.set(`Model ${i + 1}`, i);
+    });
+
+    if (!isBlank(serialNumbersRaw)) {
+      const lines = String(serialNumbersRaw).split('\n').map(s => s.trim()).filter(Boolean);
+      const BRACKET_RE = /^\[(.+?):\s*(.*)\]$/;
+      const allBracketed = lines.length > 0 && lines.every(l => BRACKET_RE.test(l));
+
+      if (allBracketed) {
+        lines.forEach(line => {
+          const m = line.match(BRACKET_RE);
+          const key = m[1].trim(), value = m[2].trim();
+          if (!value) return;
+          if (blockIndexByKey.has(key)) {
+            blocks[blockIndexByKey.get(key)].serials.push(value);
+          } else {
+            blocks.push({ name: key, serials: [value] });
+            blockIndexByKey.set(key, blocks.length - 1);
+          }
+        });
+      } else {
+        // Old flat format (no brackets) — every serial belongs to the
+        // one model that existed before this feature, comma-separated
+        // (matching how Step 1 used to join them).
+        const flatSerials = String(serialNumbersRaw).split(',').map(s => s.trim()).filter(Boolean);
+        if (blocks.length === 0 && flatSerials.length) blocks.push({ name: '', serials: [] });
+        if (blocks.length) blocks[0].serials.push(...flatSerials);
+      }
+    }
+
+    return blocks;
   }
 
   function formatDate(dateString) {
@@ -3802,41 +4024,13 @@
 
     try {
       // Model Name / Serial Numbers — built from the .model-block repeater
-      // (see addModelBlock()/generateModelSerialInputs()) rather than the
-      // old single Model Name + flat serial list, so a serial number can
-      // be tied back to which model it belongs to.
-      //   modelName     -> multi-line text, one Model Name per line, in
-      //                    the SAME order the blocks are shown in — this
-      //                    needs the matching SharePoint column changed
-      //                    to "Multiple lines of text" (was single line).
-      //   serialNumbers -> multi-line text, one "[Model N: value]" line
-      //                    per serial number — N is that serial's
-      //                    model's 1-based position (matching the Nth
-      //                    line of modelName above), NOT the typed model
-      //                    name itself, so two models sharing an
-      //                    identical typed name still resolve unambiguously.
-      // Both stay "N/A" when the Model Name toggle above is at N/A,
-      // regardless of any values left over in hidden blocks.
-      let modelName = 'N/A', serialNumbers = 'N/A';
-      if (document.getElementById('hasModelToggle').value !== 'N/A') {
-        const modelNameLines = [];
-        const serialNumberLines = [];
-        document.querySelectorAll('#modelBlocksContainer .model-block').forEach((block, i) => {
-          const nameVal = (block.querySelector('.model-name-input')?.value || '').trim();
-          if (nameVal) modelNameLines.push(nameVal);
-          // Key = the actual typed Model Name — falls back to "Model N"
-          // (N = this block's 1-based position) only if that model's own
-          // name was left blank, so a serial number is never recorded
-          // under an empty key.
-          const key = nameVal || `Model ${i + 1}`;
-          block.querySelectorAll('.model-serial-input').forEach(si => {
-            const v = (si.value || '').trim();
-            if (v) serialNumberLines.push(`[${key}: ${v}]`);
-          });
-        });
-        if (modelNameLines.length) modelName = modelNameLines.join('\n');
-        if (serialNumberLines.length) serialNumbers = serialNumberLines.join('\n');
-      }
+      // (see addModelBlock()/generateModelSerialInputs()) via the shared
+      // _extractModelSerialData() helper — see that function's comment
+      // for the exact modelName/serialNumbers shape produced. Also used
+      // by saveClaimEdit() (Claim Monitor Edit Details) against its own
+      // edit* prefixed block ids, so both places build this payload the
+      // exact same way.
+      const { modelName, serialNumbers } = _extractModelSerialData('hasModelToggle', 'modelBlocksContainer');
       const imagesBase64 = await getBase64ObjectArray(claimImageFiles);
       const docsBase64   = await getBase64ObjectArray(claimDocFiles);
 
@@ -5410,8 +5604,10 @@
       // brand-new claim — nothing to restore in that case.
       updateEditDistributors(resolveField(selectedClaimData, ['customerCode','CustomerCode'], ''));
       document.getElementById('editTypeAir').value    = resolveField(selectedClaimData, ['typeAir','TypeAir'], 'RAC');
-      document.getElementById('editModel').value      = resolveField(selectedClaimData, ['modelName','ModelName'], '');
-      document.getElementById('editSerial').value     = resolveField(selectedClaimData, ['serialNumbers','SerialNumbers'], '');
+      restoreEditModelBlocks(
+        resolveField(selectedClaimData, ['modelName','ModelName'], ''),
+        resolveField(selectedClaimData, ['serialNumbers','SerialNumbers'], '')
+      );
       restoreEditPartSelection(
         resolveField(selectedClaimData, ['partNo','PartNo'], ''),
         resolveField(selectedClaimData, ['part','Part','partName'], '')
@@ -5447,6 +5643,9 @@
     try {
       const imagesBase64 = await getBase64ObjectArray(editImageFiles);
       const docsBase64   = await getBase64ObjectArray(editDocFiles);
+      // Same shared extraction submitClaim() uses on Step 1 — see
+      // _extractModelSerialData()'s comment.
+      const editModelData = _extractModelSerialData('editHasModelToggle', 'editModelBlocksContainer');
       const payload = {
         id:              selectedClaimId.toString(),
         subject:         document.getElementById('editSubject').value,
@@ -5462,8 +5661,8 @@
         customerCode:         document.getElementById('editCustomerCode').value,
         distributorShortName: document.getElementById('editDistShortName').value,
         typeAir:         document.getElementById('editTypeAir').value,
-        modelName:       document.getElementById('editModel').value,
-        serialNumbers:   document.getElementById('editSerial').value,
+        modelName:       editModelData.modelName,
+        serialNumbers:   editModelData.serialNumbers,
         // NOTE: field names below (part/detail) must match claims.js's own
         // column names exactly — this was previously sent as partName /
         // problemDetail, which don't match any column claims.js (or any
