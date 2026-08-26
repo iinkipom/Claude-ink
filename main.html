@@ -4171,21 +4171,33 @@
         if (ta.value.trim()) iData.push(`[Detail ${circledNumbers[i] || i+1}] ${ta.value.trim()}`);
       });
 
-      // Collect & encode inspection images with block tag
+      // Collect & encode inspection images with block tag. Uses
+      // _resolveExistingPhotosForSave() — the same helper the Verify
+      // Claim/Considerations save path already relies on — instead of
+      // reading investigationImageStore directly, so a block whose only
+      // photo is an already-saved SharePoint URL (never re-attached this
+      // session) gets properly re-fetched and re-encoded rather than
+      // either (a) silently dropped, or (b) sent with the URL
+      // masquerading as base64, which produces a missing `content` field
+      // and crashes the flow's base64ToBinary() with "the provided value
+      // is of type 'Null'" (exactly the bug reported on
+      // SmartQC - Save_Inspection_URL). A plain forEach can't await, so
+      // this needs a for-of loop like the sibling function uses.
       let inspImgs = [];
-      document.querySelectorAll('.dynamic-block .insp-img').forEach((inp, idx) => {
+      for (const [idx, inp] of Array.from(document.querySelectorAll('.dynamic-block .insp-img')).entries()) {
         const storeKey = `inspPrev_${idx + 1}`;
-        if (inp.files.length > 0)
+        if (inp.files.length > 0) {
           Array.from(inp.files).forEach(f => {
             const taggedName = `InspBlock${idx+1}_${f.name}`;
             inspImgs.push({ ref: `[Inspection ${circledNumbers[idx]||idx+1}]`, file: f, taggedName });
           });
-        else if (investigationImageStore[storeKey])
-          investigationImageStore[storeKey].forEach(e => {
-            const taggedName = e.name.startsWith('InspBlock') ? e.name : `InspBlock${idx+1}_${e.name}`;
+        } else {
+          (await _resolveExistingPhotosForSave(storeKey)).forEach(e => {
+            const taggedName = e.name && e.name.startsWith('InspBlock') ? e.name : `InspBlock${idx+1}_${e.name || 'image.jpg'}`;
             inspImgs.push({ ref: `[Inspection ${circledNumbers[idx]||idx+1}]`, file: null, dataUrl: e.dataUrl, taggedName, name: taggedName });
           });
-      });
+        }
+      }
 
       const inspImagesBase64 = await Promise.all(inspImgs.map(obj => {
         if (obj.file) return new Promise(res => { const r = new FileReader(); r.onload = () => res({ ref: obj.ref, name: obj.taggedName, content: r.result.split(',')[1] }); r.readAsDataURL(obj.file); });
@@ -5142,7 +5154,32 @@
    *  attaching more elsewhere and submitting" bug). */
   async function _resolveExistingPhotosForSave(containerId) {
     const stored = investigationImageStore[containerId];
-    if (stored && stored.length) return stored;
+    if (stored && stored.length) {
+      // Entries here should already be genuine base64 (see
+      // handleInvestigationPreviews()'s comment), but re-fetch/re-encode
+      // — same as the URL branch below — anything that somehow isn't,
+      // rather than passing a real SharePoint URL through as if it were
+      // base64 and letting a downstream base64ToBinary() crash on it.
+      const out = [];
+      for (const e of stored) {
+        if (e.dataUrl && e.dataUrl.startsWith('data:')) { out.push(e); continue; }
+        if (!e.dataUrl) continue;
+        try {
+          const resp = await fetch(e.dataUrl);
+          const blob = await resp.blob();
+          const dataUrl = await new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result);
+            r.onerror = reject;
+            r.readAsDataURL(blob);
+          });
+          out.push({ name: e.name || 'image.jpg', dataUrl });
+        } catch (err) {
+          console.warn('[_resolveExistingPhotosForSave] could not re-fetch stored photo URL, it will be missing from this save:', e.dataUrl, err);
+        }
+      }
+      return out;
+    }
 
     const container = document.getElementById(containerId);
     const out = [];
@@ -5369,9 +5406,29 @@
     const container = document.getElementById(containerId);
     if (!container) return;
 
+    // BUGFIX: this fallback used to grab EVERY <img> in the container,
+    // including ones restored from an already-saved claim's real
+    // SharePoint URL (https://macoth.sharepoint.com/...) — not a base64
+    // data: URL. Later, whatever consumes this entry (submitInspection(),
+    // etc.) does `dataUrl.split(',')[1]` to pull the base64 payload back
+    // out, which for a plain https:// URL with no comma returns
+    // `undefined` — a `content` key that then goes MISSING from the
+    // JSON body entirely (JSON.stringify drops undefined properties).
+    // The PAD flow's Apply_to_each then reads that missing field as
+    // Null via safe-access and its Create file action crashes with
+    // "the template language function 'base64ToBinary' expects its
+    // parameter to be a string. The provided value is of type 'Null'."
+    // (seen on SmartQC - Save_Inspection_URL). Fix: only pick up <img>
+    // elements that are ACTUALLY base64 previews — an already-saved
+    // SharePoint photo doesn't need to be re-sent as a "new" upload at
+    // all (deletedInspectionImages already exists specifically to tell
+    // the flow which existing URLs to drop; everything else it already
+    // has stays untouched without being resent).
     const existingEntries = (investigationImageStore[containerId] && investigationImageStore[containerId].length)
       ? investigationImageStore[containerId]
-      : Array.from(container.querySelectorAll('img')).map(img => ({ name: img.title || '', dataUrl: img.src }));
+      : Array.from(container.querySelectorAll('img'))
+          .filter(img => img.src.startsWith('data:'))
+          .map(img => ({ name: img.title || '', dataUrl: img.src }));
 
     const reads = files.map(file => new Promise(resolve => {
       const reader = new FileReader();
