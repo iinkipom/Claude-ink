@@ -9778,10 +9778,32 @@
         const dueDate = _toDateOrNull(b.due);
         const isOverdue = (effDate && effDate <= today) || (dueDate && dueDate <= today);
         if (!isOverdue) return;
-        overdue.push({ type, num, text: b.text, eff: b.eff, due: b.due, ngResult: state[key] ? state[key].result : null });
+        overdue.push({
+          type, num, text: b.text, eff: b.eff, due: b.due,
+          ngResult: state[key] ? state[key].result : null,
+          statusLabel: _dueStatusLabel(effDate, dueDate, today)
+        });
       });
     });
     return overdue;
+  }
+
+  /** "Now on due." (Effective/Due Date is TODAY) vs "Overdue." (it's
+   *  already passed) — the wording generateFollowUpEml() and
+   *  checkOverdueActionsAndNotify() both put next to each action.
+   *  Prefers the Effective Date as the reference (matches how this
+   *  wording was specified), falling back to the Due Date only when
+   *  Effective Date isn't itself what made the action overdue (blank,
+   *  invalid, or still in the future while Due Date has already
+   *  arrived). Both dates are expected already normalized to midnight
+   *  (via _toDateOrNull()), same as `today`, so same-day comparison via
+   *  getTime() is exact. */
+  function _dueStatusLabel(effDate, dueDate, today) {
+    const refDate = (effDate && effDate <= today) ? effDate : dueDate;
+    if (!refDate) return '';
+    return (refDate.getTime() === today.getTime())
+      ? 'Now on due. Please submit evidence'
+      : 'Overdue. Please submit evidence';
   }
 
   /** Resolves a claim's saved Team Leader NAME (claim.teamLeader — set by
@@ -9837,7 +9859,7 @@
           subject: resolveField(claim, ['Subject', 'subject'], 'N/A'),
           teamLeaderEmail: tlEmail,
           teamLeaderName: resolveField(claim, ['teamLeader', 'TeamLeader'], ''),
-          actions: overdue.map(a => `[${a.type} ${a.num}] ${a.text} (Eff: ${a.eff} | Due: ${a.due})`).join('\n'),
+          actions: overdue.map(a => `[${a.type} ${a.num}] ${a.text} (Eff: ${a.eff} | Due: ${a.due}) — ${a.statusLabel}`).join('\n'),
           deepLink: `${location.origin}${location.pathname.replace(/[^/]*$/, '')}main.html?openVerify=${encodeURIComponent(claimId)}`
         })
       }).catch(e => console.log('[DueReminder] send suppressed (CORS/offline):', e));
@@ -11311,17 +11333,19 @@
   /** Manual half of the Due/Effective Date follow-up feature — the
    *  "📧 Generate Follow-Up Email" button in Verify Claim. Opens the
    *  user's own default mail client via a mailto: link, pre-filled with
-   *  the Team Leader as receiver, a subject, and a body listing every
-   *  action _findOverdueActionsForClaim() finds on the CURRENTLY OPEN
-   *  claim — all three (receiver, subject, body) still fully editable
-   *  in the compose window before sending, using the same deep-link
-   *  format confirmVerificationAssignments() sends. Purely client-side,
-   *  no PAD flow involved — unlike the automatic reminder above, which
-   *  sends on its own via SEND_DUE_REMINDER_URL, this hands control to
-   *  the user rather than sending anything itself. mailto: bodies are
-   *  plain text only (no HTML/table formatting), so the layout here
-   *  stays simple rather than matching the automatic reminder's richer
-   *  HTML email. */
+   *  a subject and a body listing every action
+   *  _findOverdueActionsForClaim() finds on the CURRENTLY OPEN claim —
+   *  using the same deep-link format confirmVerificationAssignments()
+   *  sends. Receiver is deliberately left BLANK (the user types it in
+   *  themselves — this app doesn't reliably know who else besides the
+   *  Team Leader should be on a given follow-up), and subject/body are
+   *  both still fully editable in the compose window before sending.
+   *  Purely client-side, no PAD flow involved — unlike the automatic
+   *  reminder above, which sends on its own via SEND_DUE_REMINDER_URL,
+   *  this hands control to the user rather than sending anything
+   *  itself. mailto: bodies are plain text only (no HTML/table
+   *  formatting), so the layout here stays simple rather than matching
+   *  the automatic reminder's richer HTML email. */
   function generateFollowUpEml() {
     if (!selectedClaimId || !selectedClaimData) { alert('Please open a claim first.'); return; }
 
@@ -11335,15 +11359,7 @@
     const subject = resolveField(selectedClaimData, ['Subject', 'subject'], 'N/A');
     const runNo = selectedClaimData.index_running_no || selectedClaimData.IndexRunningNo || selectedClaimData.index || selectedClaimData.Index || 1;
     const claimNo = buildClaimNo(runNo, resolveField(selectedClaimData, ['issueDate', 'IssueDate'], ''));
-    const tlName = resolveField(selectedClaimData, ['teamLeader', 'TeamLeader'], '');
-    const tlEmail = _resolveTeamLeaderEmail(selectedClaimData) || '';
     const deepLink = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}main.html?openVerify=${encodeURIComponent(selectedClaimId)}`;
-
-    if (!tlEmail) {
-      // Still open the compose window — the user can fill in a To:
-      // address themselves — but flag it so it isn't a silent surprise.
-      console.log('[generateFollowUpEml] No resolvable Team Leader email for this claim — leaving To: blank.');
-    }
 
     // mailto: opens the user's own default mail client with a REAL,
     // editable compose window (receiver, subject, body all still
@@ -11353,10 +11369,10 @@
     // some mail clients truncate very long bodies, so this list format
     // stays plain and compact rather than the earlier HTML table.
     const actionLines = overdue.map(a =>
-      `- [${a.type} ${a.num}] ${a.text} (Eff: ${a.eff} | Due: ${a.due}) — ${a.ngResult || 'Not yet verified'}`
+      `- [${a.type} ${a.num}] ${a.text} (Eff: ${a.eff} | Due: ${a.due}) — ${a.statusLabel}`
     );
     const bodyText = [
-      `Dear ${tlName || 'Team Leader'},`,
+      'Dear All Concerned,',
       '',
       `The following action(s) on ${claimNo} - ${subject} have reached (or passed) their Effective Date or Due Date and still need follow-up:`,
       '',
@@ -11368,11 +11384,8 @@
     ].join('\n');
 
     const emlSubject = `Follow-Up Required: ${claimNo} - ${subject}`;
-    // NOTE: tlEmail is NOT percent-encoded here — the "to" part of a
-    // mailto: URI is conventionally the literal address (encoding the @
-    // as %40 confuses some mail clients' recipient parsing); only the
-    // query-string parameters need encoding.
-    const mailtoUrl = `mailto:${tlEmail}?subject=${encodeURIComponent(emlSubject)}&body=${encodeURIComponent(bodyText)}`;
+    // No "to" address — left blank on purpose, filled in manually.
+    const mailtoUrl = `mailto:?subject=${encodeURIComponent(emlSubject)}&body=${encodeURIComponent(bodyText)}`;
     window.location.href = mailtoUrl;
   }
 
