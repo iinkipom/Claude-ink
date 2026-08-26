@@ -989,7 +989,7 @@
           <div style="display:flex; gap:10px; padding-top:16px; border-top:1px solid var(--border-light); margin-top:24px; align-items:center;">
             <button class="btn btn-red" id="submitVerificationBtn" style="width:auto; padding:12px 24px;" onclick="submitVerification()">✅ Submit Verification</button>
             <button class="btn" id="confirmAssignmentBtn" style="width:auto; padding:12px 24px; background:var(--surface-2); color:var(--charcoal); border:1px solid var(--border);" onclick="confirmVerificationAssignments()" title="Email everyone currently assigned a verify person on this claim, with a link straight to this page">📧 Confirm Assignment &amp; Notify</button>
-            <button class="btn" id="generateFollowUpEmlBtn" style="width:auto; padding:12px 24px; background:var(--surface-2); color:var(--charcoal); border:1px solid var(--border);" onclick="generateFollowUpEml()" title="Download a .eml addressed to this claim's Team Leader listing every action already on/past its Effective Date or Due Date">📧 Generate Follow-Up Email (.eml)</button>
+            <button class="btn" id="generateFollowUpEmlBtn" style="width:auto; padding:12px 24px; background:var(--surface-2); color:var(--charcoal); border:1px solid var(--border);" onclick="generateFollowUpEml()" title="Opens your email app with a draft to this claim's Team Leader, listing every action already on/past its Effective Date or Due Date — receiver and body are still editable before sending">📧 Generate Follow-Up Email</button>
             <span id="verifyStatusMsg" style="font-size:12px; color:var(--charcoal-soft);"></span>
           </div>
         </div>
@@ -11309,14 +11309,19 @@
   }
 
   /** Manual half of the Due/Effective Date follow-up feature — the
-   *  "📧 Generate Follow-Up Email (.eml)" button in Verify Claim. Builds
-   *  a standard .eml file (opens directly in Outlook or any mail client)
-   *  listing every action _findOverdueActionsForClaim() finds on the
-   *  CURRENTLY OPEN claim, addressed to that claim's Team Leader, using
-   *  the same deep-link format confirmVerificationAssignments() sends.
-   *  Purely client-side — this downloads a file for the user to open/
-   *  send/forward themselves, no PAD flow involved, unlike the automatic
-   *  reminder above which sends on its own via SEND_DUE_REMINDER_URL. */
+   *  "📧 Generate Follow-Up Email" button in Verify Claim. Opens the
+   *  user's own default mail client via a mailto: link, pre-filled with
+   *  the Team Leader as receiver, a subject, and a body listing every
+   *  action _findOverdueActionsForClaim() finds on the CURRENTLY OPEN
+   *  claim — all three (receiver, subject, body) still fully editable
+   *  in the compose window before sending, using the same deep-link
+   *  format confirmVerificationAssignments() sends. Purely client-side,
+   *  no PAD flow involved — unlike the automatic reminder above, which
+   *  sends on its own via SEND_DUE_REMINDER_URL, this hands control to
+   *  the user rather than sending anything itself. mailto: bodies are
+   *  plain text only (no HTML/table formatting), so the layout here
+   *  stays simple rather than matching the automatic reminder's richer
+   *  HTML email. */
   function generateFollowUpEml() {
     if (!selectedClaimId || !selectedClaimData) { alert('Please open a claim first.'); return; }
 
@@ -11335,60 +11340,40 @@
     const deepLink = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}main.html?openVerify=${encodeURIComponent(selectedClaimId)}`;
 
     if (!tlEmail) {
-      // Still generate the file — the user can fill in a To: address
-      // themselves in their mail client — but flag it so it isn't a
-      // silent surprise.
+      // Still open the compose window — the user can fill in a To:
+      // address themselves — but flag it so it isn't a silent surprise.
       console.log('[generateFollowUpEml] No resolvable Team Leader email for this claim — leaving To: blank.');
     }
 
-    const rowsHtml = overdue.map(a => `
-      <tr>
-        <td style="padding:6px 10px; border:1px solid #ddd;">[${escapeHtml(a.type)} ${a.num}]</td>
-        <td style="padding:6px 10px; border:1px solid #ddd;">${escapeHtml(a.text)}</td>
-        <td style="padding:6px 10px; border:1px solid #ddd;">${escapeHtml(a.eff)}</td>
-        <td style="padding:6px 10px; border:1px solid #ddd;">${escapeHtml(a.due)}</td>
-        <td style="padding:6px 10px; border:1px solid #ddd;">${a.ngResult || 'Not yet verified'}</td>
-      </tr>`).join('');
-
-    const bodyHtml = `<div style="font-family:Arial,sans-serif; font-size:13px; color:#171717;">
-      <p>Dear ${escapeHtml(tlName || 'Team Leader')},</p>
-      <p>The following action(s) on <strong>${escapeHtml(claimNo)} — ${escapeHtml(subject)}</strong> have reached (or passed) their Effective Date or Due Date and still need follow-up:</p>
-      <table style="border-collapse:collapse; font-family:Arial,sans-serif; font-size:13px;">
-        <tr style="background:#EDEDED; font-weight:bold;">
-          <td style="padding:6px 10px; border:1px solid #ddd;">Action</td>
-          <td style="padding:6px 10px; border:1px solid #ddd;">Detail</td>
-          <td style="padding:6px 10px; border:1px solid #ddd;">Effective Date</td>
-          <td style="padding:6px 10px; border:1px solid #ddd;">Due Date</td>
-          <td style="padding:6px 10px; border:1px solid #ddd;">Status</td>
-        </tr>
-        ${rowsHtml}
-      </table>
-      <p>Please follow up and update the verification status here: <a href="${deepLink}">${deepLink}</a></p>
-      <p>— Q-FLOW Smart Quality Control System</p>
-    </div>`;
+    // mailto: opens the user's own default mail client with a REAL,
+    // editable compose window (receiver, subject, body all still
+    // changeable before sending) — unlike downloading a .eml file, which
+    // has to be found in Downloads and double-clicked first. Trade-off:
+    // mailto: bodies are plain text only (no table/HTML formatting) and
+    // some mail clients truncate very long bodies, so this list format
+    // stays plain and compact rather than the earlier HTML table.
+    const actionLines = overdue.map(a =>
+      `- [${a.type} ${a.num}] ${a.text} (Eff: ${a.eff} | Due: ${a.due}) — ${a.ngResult || 'Not yet verified'}`
+    );
+    const bodyText = [
+      `Dear ${tlName || 'Team Leader'},`,
+      '',
+      `The following action(s) on ${claimNo} - ${subject} have reached (or passed) their Effective Date or Due Date and still need follow-up:`,
+      '',
+      ...actionLines,
+      '',
+      `Please follow up and update the verification status here: ${deepLink}`,
+      '',
+      '— Q-FLOW Smart Quality Control System'
+    ].join('\n');
 
     const emlSubject = `Follow-Up Required: ${claimNo} - ${subject}`;
-    // Minimal valid .eml (RFC 822 headers + blank line + HTML body) —
-    // opens directly in Outlook/any mail client as a draft-like message.
-    const emlContent = [
-      `To: ${tlEmail}`,
-      `Subject: ${emlSubject}`,
-      `Date: ${new Date().toUTCString()}`,
-      'MIME-Version: 1.0',
-      'Content-Type: text/html; charset=UTF-8',
-      '',
-      bodyHtml
-    ].join('\r\n');
-
-    const blob = new Blob([emlContent], { type: 'message/rfc822' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `FollowUp_${claimNo.replace(/[^a-zA-Z0-9-_]/g, '_')}.eml`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // NOTE: tlEmail is NOT percent-encoded here — the "to" part of a
+    // mailto: URI is conventionally the literal address (encoding the @
+    // as %40 confuses some mail clients' recipient parsing); only the
+    // query-string parameters need encoding.
+    const mailtoUrl = `mailto:${tlEmail}?subject=${encodeURIComponent(emlSubject)}&body=${encodeURIComponent(bodyText)}`;
+    window.location.href = mailtoUrl;
   }
 
   /* ── GENERATE DRAFT REPORT (Print / A4) ── */
