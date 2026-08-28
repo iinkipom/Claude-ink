@@ -1309,11 +1309,30 @@
           <h3 id="tgDayDetailTitle">—</h3>
           <span id="tgDayDetailResultBadge" class="tg-result-badge"></span>
         </div>
-        <div class="tg-day-modal-sub">Running Point / Target total (matches the chart line) — small numbers are that day's own contribution</div>
+        <div id="tgDayDetailActivity"></div>
+        <div class="tg-day-modal-sub" style="margin-top:16px;">Day-by-day — running Point / Target total (matches the chart line), small numbers are that day's own contribution</div>
         <div id="tgDayDetailBody"></div>
         <div id="tgDayDetailAnalysis" class="tg-analysis" style="display:none;"></div>
         <div class="tg-day-modal-actions">
           <button type="button" class="tg-day-modal-close" onclick="closeTgDayDetailModal()">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCOREBOARD PERIOD-TALLY DETAIL MODAL — click any Weekly/Monthly/
+         Fiscal Year tally card to open. Same _renderPeriodActivityHtml()
+         content as Team Graph's modal above, without the day-by-day
+         breakdown (a tally card already IS one period, no finer
+         granularity to show). -->
+    <div id="sbPeriodDetailModal" class="tg-day-modal-overlay" style="display:none;" onclick="if(event.target===this)closeSbPeriodDetailModal()">
+      <div class="tg-day-modal-card">
+        <div class="tg-day-modal-head">
+          <h3 id="sbPeriodDetailTitle">—</h3>
+          <span id="sbPeriodDetailResultBadge" class="tg-result-badge"></span>
+        </div>
+        <div id="sbPeriodDetailActivity"></div>
+        <div class="tg-day-modal-actions">
+          <button type="button" class="tg-day-modal-close" onclick="closeSbPeriodDetailModal()">Close</button>
         </div>
       </div>
     </div>
@@ -7405,7 +7424,7 @@
         const pointWins = ptPositive >= tgPositive;
 
         html += `
-          <div class="sb-period ${hasAny ? '' : 'empty'}">
+          <div class="sb-period ${hasAny ? '' : 'empty'}" style="cursor:pointer;" onclick="openScoreboardPeriodDetail(${i})" title="Click for what happened this period">
             <div class="sb-period-num">${labels[i]}</div>
             <div class="sb-period-combined">
               <div class="sb-period-stat cc"><span class="k">Case</span><span class="v sb-font-digit">${w.issued || 0}</span></div>
@@ -7793,6 +7812,76 @@
     return { periodPoint: bucket.point - prevBucket.point, periodTarget: bucket.target - prevBucket.target };
   }
 
+  /** Full "what happened in this period" breakdown for an arbitrary set of
+   *  calendar days — the shared engine behind both the Scoreboard tally
+   *  card click detail and Team Graph's point click detail. Independent
+   *  of any bucket-index/module-render-state — just needs the day range
+   *  (from _scoreboardBucketDateRange()/_teamGraphDateRangeForBucket()).
+   *  Returns:
+   *    issued  — every claim ISSUED in this range: {id, subject, isClosed}
+   *    closed  — every claim CLOSED (and scored) in this range, SORTED
+   *              ascending by score, each with {id, subject, score,
+   *              takeTimeDays} — takeTimeDays is working days from
+   *              IssueDate to CloseDate (calculateClaimTakeTime()), not
+   *              the separate StartDate-based claimTakeTime field, since
+   *              this needs to always be computable from fields every
+   *              claim already carries (issueDate/closeDate) rather than
+   *              depending on an optional saved field.
+   *    point / target — this period's own Point/Target totals (sum of
+   *              `closed` scores / targetPerCase × issued.length)
+   *    dragClaims — closed claims that are BOTH below this period's own
+   *              average score AND slower than this period's own average
+   *              take-time — i.e. "dragging the team down" RELATIVE TO
+   *              this period's own claims, not a fixed score/day
+   *              threshold (score ranges and normal handling time both
+   *              vary too much across claim types for a fixed cutoff to
+   *              mean anything). Needs >=2 closed claims to even have an
+   *              "average" worth comparing against. */
+  function _claimActivityForDays(days) {
+    if (!days.length) return { issued: [], closed: [], point: 0, target: 0, dragClaims: [] };
+    const targetPerCase = getTargetPerCase();
+    const claims = (typeof ACTIVE_CLAIMS_DATABASE !== 'undefined' && Array.isArray(ACTIVE_CLAIMS_DATABASE))
+      ? ACTIVE_CLAIMS_DATABASE
+      : (Array.isArray(activeClaimsList) ? activeClaimsList : []);
+    const inRange = (d) => days.some(day => d.getFullYear() === day.getFullYear() && d.getMonth() === day.getMonth() && d.getDate() === day.getDate());
+
+    const issued = [];
+    const closed = [];
+    claims.forEach(c => {
+      const id = c.id || c.ID || '?';
+      const subject = resolveField(c, ['Subject', 'subject'], '');
+      const issueDate = _toDateOrNull(resolveField(c, ['issueDate', 'IssueDate'], ''));
+      const closeDate = _toDateOrNull(resolveField(c, ['closeDate', 'CloseDate'], ''));
+      if (issueDate && inRange(issueDate)) {
+        issued.push({ id, subject, isClosed: !!closeDate });
+      }
+      if (closeDate && inRange(closeDate)) {
+        const totalRaw = resolveField(c, ['totalScore', 'TotalScore'], '');
+        const total = Number(totalRaw);
+        if (!isNaN(total) && totalRaw !== '') {
+          const takeTimeDays = issueDate ? calculateClaimTakeTime(issueDate, closeDate) : null;
+          closed.push({ id, subject, score: total, takeTimeDays });
+        }
+      }
+    });
+    closed.sort((a, b) => a.score - b.score);
+
+    const point = closed.reduce((s, c) => s + c.score, 0);
+    const target = issued.length * targetPerCase;
+
+    let dragClaims = [];
+    if (closed.length >= 2) {
+      const avgScore = point / closed.length;
+      const timed = closed.filter(c => c.takeTimeDays !== null);
+      const avgTime = timed.length ? timed.reduce((s, c) => s + c.takeTimeDays, 0) / timed.length : null;
+      if (avgTime !== null) {
+        dragClaims = closed.filter(c => c.score < avgScore && c.takeTimeDays !== null && c.takeTimeDays > avgTime);
+      }
+    }
+
+    return { issued, closed, point, target, dragClaims };
+  }
+
   function _computeTeamGraphData() {
     const now = tgHistoryDate || new Date(); // history anchor, if the user picked one — otherwise live "now"
     _tgRenderNow = now;
@@ -7851,29 +7940,40 @@
     _renderTeamGraphLineChart(labels, buckets, monthGroups);
   }
 
-  /** Reconstructs the real calendar day(s) a given chart point (bucket
-   *  index) covers, using the SAME anchor/monthGroups the chart was just
-   *  drawn with (_tgRenderNow/_tgRenderMonthGroups) and the SAME
-   *  week-of-month convention _buildPeriodBuckets()/
-   *  _buildFiscalYearWeeklyBuckets() already build their buckets with
-   *  (days 1-7 = week1, 8-14 = week2, ... — see _weekOfMonth()), so the
-   *  range returned here always matches what actually landed in that
-   *  point's cumulative total.
-   *    'week'  mode: a point IS one day  -> returns that single Date.
-   *    'month' mode: a point is one week -> returns that week's Dates.
-   *    'fy'    mode: a point is one week (within a month) -> same, but
-   *                  the month is looked up via monthGroups first. */
-  function _teamGraphDateRangeForBucket(bucketIndex) {
-    const now = _tgRenderNow || new Date();
-
-    if (tgViewMode === 'week') {
+  /** Reconstructs the real calendar day(s) bucket `bucketIndex` of a
+   *  Week/Month/Fiscal-Year period view covers — the SAME week-of-month
+   *  convention _buildPeriodBuckets()/_buildFiscalYearWeeklyBuckets()
+   *  already build their own buckets with (days 1-7 = week1, 8-14 =
+   *  week2, ... — see _weekOfMonth()), so the range returned here always
+   *  matches what actually landed in that bucket's total. Takes mode/now/
+   *  monthGroups explicitly (rather than reading Team-Graph-only module
+   *  state) so both Team Graph (_teamGraphDateRangeForBucket()) and the
+   *  Scoreboard's own period tally (_scoreboardBucketDateRange()) can
+   *  call this independently:
+   *    'week'  -> bucketIndex IS one day.
+   *    'month' -> bucketIndex is one week-of-month.
+   *    'fy'    -> EITHER whole calendar months (monthGroups omitted —
+   *               Scoreboard's own FY tally, one card per month) OR
+   *               weeks-within-months (monthGroups passed — Team Graph's
+   *               FY mode, since its chart needs finer weekly resolution
+   *               than Scoreboard's 12-card month strip). */
+  function _periodBucketDateRange(mode, now, bucketIndex, monthGroups) {
+    if (mode === 'week') {
       const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
       return [new Date(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate() + bucketIndex)];
     }
 
+    if (mode === 'fy' && !monthGroups) {
+      const { start } = _fiscalYearBounds(now);
+      const monthDate = new Date(start.getFullYear(), start.getMonth() + bucketIndex, 1);
+      const daysInMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0).getDate();
+      const days = [];
+      for (let d = 1; d <= daysInMonth; d++) days.push(new Date(monthDate.getFullYear(), monthDate.getMonth(), d));
+      return days;
+    }
+
     let year, month, weekIdx;
-    if (tgViewMode === 'fy') {
-      const monthGroups = _tgRenderMonthGroups || [];
+    if (mode === 'fy') {
       const mIdx = monthGroups.findIndex(g => bucketIndex >= g.startIndex && bucketIndex <= g.endIndex);
       if (mIdx < 0) return [];
       const { start } = _fiscalYearBounds(now);
@@ -7893,9 +7993,103 @@
     return days;
   }
 
+  /** Team Graph's own wrapper — uses its module-level render anchor/mode
+   *  (_tgRenderNow/tgViewMode/_tgRenderMonthGroups), unaffected by
+   *  Scoreboard's separate view mode. */
+  function _teamGraphDateRangeForBucket(bucketIndex) {
+    return _periodBucketDateRange(tgViewMode, _tgRenderNow || new Date(), bucketIndex, tgViewMode === 'fy' ? _tgRenderMonthGroups : null);
+  }
+
+  /** Scoreboard's own wrapper — always "now" (Scoreboard has no history
+   *  anchor the way Team Graph does) and monthGroups omitted even in 'fy'
+   *  mode, since Scoreboard's own FY tally is 12 whole-month cards, not
+   *  Team Graph's finer weekly breakdown. */
+  function _scoreboardBucketDateRange(bucketIndex) {
+    return _periodBucketDateRange(sbViewMode, new Date(), bucketIndex, null);
+  }
+
   function closeTgDayDetailModal() {
     const modal = document.getElementById('tgDayDetailModal');
     if (modal) modal.style.display = 'none';
+  }
+
+  /** Opens the Scoreboard's period-tally detail modal for one clicked
+   *  tally card (bucketIndex matches that card's position in the same
+   *  Weekly/Monthly/Fiscal Year strip renderScoreboard() already draws —
+   *  see _scoreboardBucketDateRange()). Shows a Win/Lose-style result
+   *  badge plus the same issued/closed/Point-Target/drag-highlight block
+   *  Team Graph's day-detail modal uses, via _renderPeriodActivityHtml(). */
+  function openScoreboardPeriodDetail(bucketIndex) {
+    const days = _scoreboardBucketDateRange(bucketIndex);
+    if (!days.length) return;
+
+    const activity = _claimActivityForDays(days);
+    const result = _classifyPeriodResult(activity.point, activity.target);
+
+    const titleEl = document.getElementById('sbPeriodDetailTitle');
+    if (titleEl) {
+      titleEl.textContent = days.length === 1
+        ? days[0].toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+        : `${days[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${days[days.length - 1].toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    }
+    const badgeEl = document.getElementById('sbPeriodDetailResultBadge');
+    if (badgeEl) {
+      badgeEl.textContent = `${result.emoji} ${result.label}`;
+      badgeEl.style.color = result.color;
+      badgeEl.style.background = result.color + '22';
+    }
+    const activityEl = document.getElementById('sbPeriodDetailActivity');
+    if (activityEl) activityEl.innerHTML = _renderPeriodActivityHtml(activity);
+
+    const modal = document.getElementById('sbPeriodDetailModal');
+    if (modal) modal.style.display = 'flex';
+  }
+
+  function closeSbPeriodDetailModal() {
+    const modal = document.getElementById('sbPeriodDetailModal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  /** Renders _claimActivityForDays()'s output into the HTML block shared
+   *  by Team Graph's day-detail modal and the Scoreboard's period-tally
+   *  detail modal: Point/Target totals, the "dragging the team down"
+   *  highlight (only shown when there's at least one), then two columns
+   *  — every case issued this period (with an Open/Closed badge) and
+   *  every case closed & scored this period (worst score first). */
+  function _renderPeriodActivityHtml(activity) {
+    const { issued, closed, point, target, dragClaims } = activity;
+
+    let html = `<div class="tg-activity-totals">
+      <div class="tg-activity-stat pt"><span class="v">${point}</span><span class="k">Total Point</span></div>
+      <div class="tg-activity-stat tg"><span class="v">${target}</span><span class="k">Target Point</span></div>
+    </div>`;
+
+    if (dragClaims.length) {
+      html += `<div class="tg-drag-box">
+        <div class="tg-drag-title">⚠️ Dragging the team down</div>
+        <div class="tg-drag-sub">Scored below this period's own average AND took longer than average to close:</div>
+        <ul class="tg-drag-list">
+          ${dragClaims.map(c => `<li><span class="score">${c.score}pt</span><span class="days">${c.takeTimeDays}d</span>#${escapeHtml(String(c.id))}${c.subject ? ' — ' + escapeHtml(c.subject) : ''}</li>`).join('')}
+        </ul>
+      </div>`;
+    }
+
+    html += `<div class="tg-activity-cols">
+      <div class="tg-activity-col">
+        <div class="tg-activity-col-title">Issued (${issued.length})</div>
+        ${issued.length
+          ? `<ul class="tg-activity-list">${issued.map(c => `<li>#${escapeHtml(String(c.id))}${c.subject ? ' — ' + escapeHtml(c.subject) : ''} <span class="badge ${c.isClosed ? 'closed' : 'open'}">${c.isClosed ? 'Closed' : 'Open'}</span></li>`).join('')}</ul>`
+          : `<div class="tg-activity-empty">None</div>`}
+      </div>
+      <div class="tg-activity-col">
+        <div class="tg-activity-col-title">Closed &amp; Scored (${closed.length})</div>
+        ${closed.length
+          ? `<ul class="tg-activity-list">${closed.map(c => `<li><span class="score">${c.score}pt</span>#${escapeHtml(String(c.id))}${c.subject ? ' — ' + escapeHtml(c.subject) : ''}</li>`).join('')}</ul>`
+          : `<div class="tg-activity-empty">None</div>`}
+      </div>
+    </div>`;
+
+    return html;
   }
 
   /** Opens the day-detail modal for one clicked chart point — a
@@ -7949,6 +8143,11 @@
         ? days[0].toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
         : `${days[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${days[days.length - 1].toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
     }
+
+    // Full "what happened this period" block — issued/closed case lists,
+    // Point/Target totals, and the "dragging the team down" highlight.
+    const activityEl = document.getElementById('tgDayDetailActivity');
+    if (activityEl) activityEl.innerHTML = _renderPeriodActivityHtml(_claimActivityForDays(days));
 
     const bodyEl = document.getElementById('tgDayDetailBody');
     if (bodyEl) {

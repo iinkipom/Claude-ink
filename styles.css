@@ -2892,6 +2892,49 @@ textarea.form-control {
 .tg-analysis-list li:last-child { border-bottom: none; }
 .tg-analysis-list li .score { font-family: 'Orbitron', var(--font-body); font-weight: 800; color: #ff5b7a; margin-right: 8px; }
 .tg-analysis-empty { font-size: 12px; color: rgba(255,255,255,0.5); font-style: italic; }
+
+/* ---- Shared period-activity block (_renderPeriodActivityHtml()) — used
+   by both Team Graph's day-detail modal and the Scoreboard's own
+   period-tally detail modal. ---- */
+.tg-activity-totals { display: flex; gap: 12px; margin-bottom: 14px; }
+.tg-activity-stat {
+  flex: 1;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  text-align: center;
+}
+.tg-activity-stat .v { display: block; font-family: 'Orbitron', var(--font-body); font-weight: 800; font-size: 22px; }
+.tg-activity-stat.pt .v { color: #ffd9a0; }
+.tg-activity-stat.tg .v { color: #a3d4ff; }
+.tg-activity-stat .k { display: block; font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.5); letter-spacing: 0.4px; text-transform: uppercase; margin-top: 3px; }
+
+.tg-drag-box {
+  background: rgba(255,91,122,0.1);
+  border: 1px solid rgba(255,91,122,0.3);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.tg-drag-title { font-size: 12.5px; font-weight: 800; color: #ff5b7a; margin-bottom: 4px; }
+.tg-drag-sub { font-size: 11.5px; color: rgba(255,255,255,0.6); margin-bottom: 8px; }
+.tg-drag-list { margin: 0; padding: 0; list-style: none; }
+.tg-drag-list li { font-size: 12px; color: rgba(255,255,255,0.9); padding: 4px 0; }
+.tg-drag-list li .score { font-family: 'Orbitron', var(--font-body); font-weight: 800; color: #ff5b7a; margin-right: 8px; }
+.tg-drag-list li .days { font-family: 'Orbitron', var(--font-body); font-weight: 700; color: #ffb238; margin-right: 8px; }
+
+.tg-activity-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.tg-activity-col-title { font-size: 11.5px; font-weight: 800; color: rgba(255,255,255,0.55); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
+.tg-activity-list { margin: 0; padding: 0; list-style: none; max-height: 160px; overflow-y: auto; }
+.tg-activity-list li { font-size: 12px; color: rgba(255,255,255,0.85); padding: 5px 0; border-bottom: 1px dashed rgba(255,255,255,0.08); display: flex; align-items: center; gap: 6px; }
+.tg-activity-list li:last-child { border-bottom: none; }
+.tg-activity-list li .score { font-family: 'Orbitron', var(--font-body); font-weight: 800; color: #ffd9a0; flex-shrink: 0; }
+.tg-activity-list li .badge { margin-left: auto; font-size: 9.5px; font-weight: 800; padding: 2px 7px; border-radius: var(--r-full); text-transform: uppercase; flex-shrink: 0; }
+.tg-activity-list li .badge.closed { background: rgba(25,213,117,0.18); color: #19d575; }
+.tg-activity-list li .badge.open { background: rgba(255,178,56,0.18); color: #ffb238; }
+.tg-activity-empty { font-size: 12px; color: rgba(255,255,255,0.4); font-style: italic; }
+@media (max-width: 480px) { .tg-activity-cols { grid-template-columns: 1fr; } }
 .tg-day-row {
   display: grid;
   grid-template-columns: 96px 56px 56px 1fr;
