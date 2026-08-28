@@ -10459,24 +10459,40 @@
    *  fires one reminder email per newly-found affected claim to that
    *  claim's own Team Leader. Silently does nothing at all if
    *  SEND_DUE_REMINDER_URL is still the unconfigured placeholder. */
+  // How often this app is willing to fire the reminder at all, regardless
+  // of how many times someone opens/refreshes it — a single GLOBAL cooldown
+  // (not per-claim, not per-day): "remind only 1 time per 4 hours; if a
+  // user opens the app again once 4 hours have passed since the last
+  // reminder, remind again" (still-overdue claims are re-sent every cycle,
+  // same as clicking Refresh wouldn't re-trigger it moments later).
+  const DUE_REMINDER_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours
+  const DUE_REMINDER_LAST_RUN_KEY = 'qc_lastDueReminderRunAt';
+
   function checkOverdueActionsAndNotify() {
     const url = (typeof SEND_DUE_REMINDER_URL !== 'undefined' && SEND_DUE_REMINDER_URL && !SEND_DUE_REMINDER_URL.startsWith('PASTE_'))
       ? SEND_DUE_REMINDER_URL : null;
     if (!url) return; // not configured yet — see SEND_DUE_REMINDER_URL's comment
 
+    // Global 4-hour gate — checked FIRST, before touching claims.js data at
+    // all, so an open within the cooldown window does nothing whatsoever
+    // (no fetches, no console noise) rather than silently re-deduping per
+    // claim like the old once-a-day version did.
+    const lastRun = Number(localStorage.getItem(DUE_REMINDER_LAST_RUN_KEY) || 0);
+    const msSinceLastRun = Date.now() - lastRun;
+    if (lastRun && msSinceLastRun < DUE_REMINDER_COOLDOWN_MS) {
+      console.log(`[DueReminder] Skipped — last reminder run ${Math.round(msSinceLastRun / 60000)} min ago, cooldown is 4h.`);
+      return;
+    }
+
     const claims = (typeof ACTIVE_CLAIMS_DATABASE !== 'undefined' && Array.isArray(ACTIVE_CLAIMS_DATABASE)) ? ACTIVE_CLAIMS_DATABASE : [];
     if (!claims.length) return;
 
-    const todayISO = new Date().toISOString().slice(0, 10);
-    const sentKey = `qc_dueReminderSent_${todayISO}`;
-    const alreadySent = new Set(JSON.parse(localStorage.getItem(sentKey) || '[]'));
-
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const newlySent = [];
+    let sentCount = 0;
 
     claims.forEach(claim => {
       const claimId = claim.id || claim.ID;
-      if (!claimId || alreadySent.has(String(claimId))) return;
+      if (!claimId) return;
       const overdue = _findOverdueActionsForClaim(claim, today);
       if (!overdue.length) return;
       const tlEmail = _resolveTeamLeaderEmail(claim);
@@ -10489,18 +10505,26 @@
           subject: resolveField(claim, ['Subject', 'subject'], 'N/A'),
           teamLeaderEmail: tlEmail,
           teamLeaderName: resolveField(claim, ['teamLeader', 'TeamLeader'], ''),
-          actions: overdue.map(a => `[${a.type} ${a.num}] ${a.text} (Eff: ${a.eff} | Due: ${a.due}) — ${a.statusLabel}`).join('\n'),
+          // Joined with a double <br> (not a plain "\n") — the flow's Send
+          // an email (V2) action renders the Body as HTML, and HTML
+          // collapses bare newlines/whitespace, which is exactly why every
+          // action used to run together on one unreadable line. <br><br>
+          // gives each action its own clearly separated paragraph instead.
+          actions: overdue.map(a => `[${a.type} ${a.num}] ${a.text} (Eff: ${a.eff} | Due: ${a.due}) — ${a.statusLabel}`).join('<br><br>'),
           deepLink: `${location.origin}${location.pathname.replace(/[^/]*$/, '')}main.html?openVerify=${encodeURIComponent(claimId)}`
         })
       }).catch(e => console.log('[DueReminder] send suppressed (CORS/offline):', e));
 
-      newlySent.push(String(claimId));
+      sentCount++;
     });
 
-    if (newlySent.length) {
-      localStorage.setItem(sentKey, JSON.stringify([...alreadySent, ...newlySent]));
-      console.log(`[DueReminder] Sent ${newlySent.length} overdue-action reminder(s).`);
-    }
+    // Cooldown timestamp is stamped on every RUN (even a run that found
+    // zero overdue claims to send), not per claim sent — so "no one had
+    // anything overdue right now" still starts a fresh 4-hour window,
+    // matching "1 time per 4 hours" rather than "1 time per 4 hours PER
+    // CLAIM THAT HAD SOMETHING TO SAY".
+    localStorage.setItem(DUE_REMINDER_LAST_RUN_KEY, String(Date.now()));
+    if (sentCount) console.log(`[DueReminder] Sent ${sentCount} overdue-action reminder(s).`);
   }
 
   /** Loads claims.js + users.js (both needed for the overdue scan) and
