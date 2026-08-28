@@ -663,6 +663,9 @@
 
         <!-- INVESTIGATION CONTENT (hidden until started) -->
         <div id="investigationContent" style="display:none; flex-direction:column; height:100%;">
+          <div id="holdLockBanner" style="display:none; align-items:center; gap:10px; background:#fff0f3; border:1px solid #f5c6cb; border-radius:var(--r-md); padding:10px 16px; margin:0 0 14px 0; font-size:12.5px; color:var(--red); font-weight:700; line-height:1.6;">
+            <span id="holdLockBannerText"></span>
+          </div>
           <div class="workspace-tabs">
             <button class="tab-btn active" onclick="switchTab('tabPlayers', this)">1. Players</button>
             <button class="tab-btn" onclick="switchTab('tabFindingRisk', this)">2. Finding Risk</button>
@@ -917,10 +920,11 @@
               <th>Response Time</th>
               <th>Shop</th>
               <th>Status</th>
+              <th>Hold</th>
             </tr>
           </thead>
           <tbody id="claimsTableBody">
-            <tr><td colspan="12" style="text-align:center; padding:40px; color:var(--charcoal-soft);">Loading claims...</td></tr>
+            <tr><td colspan="13" style="text-align:center; padding:40px; color:var(--charcoal-soft);">Loading claims...</td></tr>
           </tbody>
         </table>
       </div>
@@ -1249,6 +1253,22 @@
         <div class="sb-modal-actions">
           <button type="button" class="sb-modal-cancel" onclick="closeHistoryModal()">Close</button>
           <button type="button" class="btn btn-red" style="width:auto; padding:10px 20px;" onclick="showHistoryOnGraph()">📈 Show on Team Graph</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- HOLD REASON MODAL — Active Claims Queue's Hold button opens this;
+         a reason is required before the hold is actually recorded. -->
+    <div id="holdReasonModal" class="sb-modal-overlay" style="display:none;" onclick="if(event.target===this)closeHoldReasonModal()">
+      <div class="sb-modal-card" style="max-width:420px;">
+        <h3>⏸ Hold This Claim</h3>
+        <p>Response time stops counting from now until Continue is clicked. All investigation input will be locked while on hold. Please give a reason (required).</p>
+        <label for="holdReasonInput">Reason for hold</label>
+        <textarea id="holdReasonInput" class="form-control" rows="3" placeholder="e.g. Waiting on shop for additional evidence"></textarea>
+        <div id="holdReasonError" style="display:none; color:var(--red); font-size:13px; font-weight:700; margin-top:8px;">Please enter a reason before holding this claim.</div>
+        <div class="sb-modal-actions">
+          <button type="button" class="sb-modal-cancel" onclick="closeHoldReasonModal()">Cancel</button>
+          <button type="button" class="btn btn-red" style="width:auto; padding:10px 24px;" onclick="submitHoldReason()">⏸ Hold Claim</button>
         </div>
       </div>
     </div>
@@ -1622,6 +1642,36 @@
   // this is currently a placeholder, so the call below will no-op until you
   // replace it (see the PASTE_ guard in closeClaimAndRecordTakeTime()).
   const SAVE_CLOSE_CLAIM_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/f5e1f850c4b04190ac04690ff58bbba1/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=QhW_zhSs8UQBWsO37qlceoGghYA8c4zvrYPKZwk8rYc";
+
+  // ── HOLD / CONTINUE URL ──────────────────────────────────────────────────
+  // Fired from _recordHoldEvent() (Active Claims Queue's Hold/Continue
+  // button) every time either button is clicked. Should update this claim's
+  // row in the Claims Microsoft List:
+  //   1. Overwrite the HoldHistory column (Multiple lines of text) with the
+  //      FULL updated string sent in the payload — not an append; the
+  //      client already builds the complete history each time.
+  //   2. (Optional, for a quick-glance List view) also write `action` into
+  //      a plain "Last Hold Action" text column and `date` into a "Last
+  //      Hold Date" Date/Time column — not read back by the app, purely for
+  //      anyone eyeballing the List directly.
+  // Payload sent: { id, action ('HOLD'|'CONTINUE'), date (ISO), reason,
+  //                 holdHistory (the full new field value to write) }
+  // JSON schema for the HTTP trigger's "When a HTTP request is received" action:
+  //   {
+  //     "type": "object",
+  //     "properties": {
+  //       "id":          { "type": "string" },
+  //       "action":      { "type": "string" },
+  //       "date":        { "type": "string" },
+  //       "reason":      { "type": "string" },
+  //       "holdHistory": { "type": "string" }
+  //     }
+  //   }
+  // PASTE YOUR "SmartQC - HoldClaim" PAD/Power Automate HTTP TRIGGER URL BELOW —
+  // this is currently a placeholder, so the call below will no-op (the
+  // in-memory lock/unlock still works instantly; only the Microsoft List
+  // write is skipped) until you replace it.
+  const SAVE_HOLD_URL = "PASTE_YOUR_PAD_URL_HERE";
 
   // ── VERIFY CLAIM URL ─────────────────────────────────────────────────────
   // Fired from the "Verify Claim" page. Payload shape matches the PAD Cloud
@@ -6860,6 +6910,7 @@
       document.getElementById('startGate').style.display='none';
       document.getElementById('investigationContent').style.display='flex';
       loadPlayerRoster();
+      _applyHoldLockState();
       return;
     }
 
@@ -6878,6 +6929,7 @@
     document.getElementById('startGate').style.display='none';
     document.getElementById('investigationContent').style.display='flex';
     loadPlayerRoster();
+    _applyHoldLockState();
     btn.innerText=origText; btn.disabled=false;
   }
 
@@ -8476,20 +8528,40 @@
      ══════════════════════════════════════════════════════════════════════════ */
 
   /**
-   * calculateClaimTakeTime(startDate, closeDate) → number of working days.
+   * calculateClaimTakeTime(startDate, closeDate, holdPeriods) → number of working days.
    * Mon–Fri only (Thai public holidays are NOT skipped — see note above).
    * Same-day close (CloseDate's calendar date === StartDate's calendar date)
    * always returns 1, regardless of weekday.
    * Returns 0 if closeDate is strictly before startDate's calendar day, or if
    * either date is invalid.
+   *
+   * holdPeriods (optional, defaults to none — every existing call site that
+   * doesn't pass it behaves exactly as before) — an array of
+   * {start: Date, end: Date|null} from getClaimHoldPeriods(). Any calendar
+   * day strictly AFTER a period's start and up to AND INCLUDING its end
+   * (or, if end is null — still on hold — up to closeDate) is excluded from
+   * the count entirely, on top of the existing weekend skip. The start day
+   * itself still counts (it was worked before the hold was clicked); the
+   * end day does not (it's the day work resumes, nothing done on it yet).
+   * Verified against the worked example from the Hold feature request:
+   * issued/held both 24–26/08/26 (2 WD by the hold), continued+closed same
+   * day 02/09/26 → still exactly 2 WD, the entire 26/08–02/09 gap excluded.
    */
-  function calculateClaimTakeTime(startDate, closeDate) {
+  function calculateClaimTakeTime(startDate, closeDate, holdPeriods) {
     const start = (startDate instanceof Date) ? startDate : new Date(startDate);
     const close = (closeDate instanceof Date) ? closeDate : new Date(closeDate);
     if (isNaN(start.getTime()) || isNaN(close.getTime())) return 0;
 
     let cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
     const endDate = new Date(close.getFullYear(), close.getMonth(), close.getDate());
+
+    const periods = (holdPeriods || [])
+      .map(p => ({
+        start: new Date(p.start.getFullYear(), p.start.getMonth(), p.start.getDate()),
+        end: p.end ? new Date(p.end.getFullYear(), p.end.getMonth(), p.end.getDate()) : null,
+      }))
+      .filter(p => !isNaN(p.start.getTime()));
+    const isHeld = (d) => periods.some(p => d > p.start && (p.end === null || d <= p.end));
 
     // Same calendar day close — always counts as 1 Working Day, regardless of weekday.
     if (endDate.getTime() === cursor.getTime()) return 1;
@@ -8501,9 +8573,187 @@
       cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
       const dow = cursor.getDay(); // 0 = Sunday, 6 = Saturday
       const isWeekend = (dow === 0 || dow === 6);
-      if (!isWeekend) workingDays++;
+      if (!isWeekend && !isHeld(cursor)) workingDays++;
     }
     return workingDays;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     HOLD / CONTINUE — Team Leader can pause an in-progress claim's response
+     time (e.g. waiting on the shop, external investigation) and resume it
+     later. Stored as one "Multiple lines of text" column on the Claims
+     Microsoft List, HoldHistory — one line per click, oldest first:
+       HOLD|<ISO timestamp>|<reason text>
+       CONTINUE|<ISO timestamp>|
+     (reason text has newlines/pipes stripped before saving, so the format
+     never breaks). The full updated string is sent on every click — same
+     "send the whole field, not a delta" convention as every other save in
+     this app — so no separate "append" logic is needed server-side. ══════ */
+
+  /** Parses one claim's raw HoldHistory field into an ordered array of
+   *  {action:'HOLD'|'CONTINUE', date: Date, reason: string}. Malformed or
+   *  unrecognized lines are skipped defensively rather than throwing. */
+  function _parseHoldHistory(claim) {
+    const raw = resolveField(claim || {}, ['holdHistory', 'HoldHistory'], '');
+    if (!raw) return [];
+    return String(raw).split('\n').map(line => {
+      const parts = line.split('|');
+      if (parts.length < 2) return null;
+      const action = parts[0].trim().toUpperCase();
+      if (action !== 'HOLD' && action !== 'CONTINUE') return null;
+      const date = new Date(parts[1].trim());
+      if (isNaN(date.getTime())) return null;
+      return { action, date, reason: (parts[2] || '').trim() };
+    }).filter(Boolean);
+  }
+
+  /** Pairs up HOLD entries with their following CONTINUE into
+   *  {start, end, reason} periods — end is null for a still-open (currently
+   *  on hold) period. A stray HOLD with no matching CONTINUE yet, or a
+   *  stray CONTINUE with nothing open, is handled defensively (extra HOLDs
+   *  while already open are ignored; extra CONTINUEs with nothing open are
+   *  ignored) so a malformed/edited-by-hand history can't crash the app. */
+  function getClaimHoldPeriods(claim) {
+    const entries = _parseHoldHistory(claim);
+    const periods = [];
+    let open = null;
+    entries.forEach(e => {
+      if (e.action === 'HOLD') {
+        if (!open) { open = { start: e.date, end: null, reason: e.reason }; periods.push(open); }
+      } else if (e.action === 'CONTINUE') {
+        if (open) { open.end = e.date; open = null; }
+      }
+    });
+    return periods;
+  }
+
+  /** Current hold state for display — is this claim on hold right now, and
+   *  if so since when / why. */
+  function getClaimHoldState(claim) {
+    const periods = getClaimHoldPeriods(claim);
+    const last = periods.length ? periods[periods.length - 1] : null;
+    const onHold = !!(last && last.end === null);
+    return {
+      onHold,
+      holdDate: onHold ? last.start : null,
+      holdReason: onHold ? last.reason : null,
+      periods,
+    };
+  }
+
+  /** Builds the new full HoldHistory string after appending one more click. */
+  function _appendHoldHistoryLine(claim, action, reason) {
+    const existing = resolveField(claim || {}, ['holdHistory', 'HoldHistory'], '');
+    const safeReason = String(reason || '').replace(/[\r\n|]+/g, ' ').trim();
+    const line = `${action}|${new Date().toISOString()}|${safeReason}`;
+    return existing ? `${existing}\n${line}` : line;
+  }
+
+  /** Shared write path for both Hold and Continue — updates the claim
+   *  in-memory (same "optimistic update, don't wait on the network" pattern
+   *  as advanceClaimStatus()) so the button/lock state flips instantly,
+   *  then fires SAVE_HOLD_URL fire-and-forget to persist it. */
+  async function _recordHoldEvent(claim, action, reason) {
+    const claimId = claim && (claim.id || claim.ID);
+    const updatedHistory = _appendHoldHistoryLine(claim, action, reason);
+
+    // Optimistic in-memory update — mirror onto every place this same claim
+    // object might be referenced (the row in activeClaimsList, and the
+    // currently-open investigation workspace if it's this same claim).
+    if (claim) claim.holdHistory = updatedHistory;
+    if (selectedClaimData && String(selectedClaimData.id || selectedClaimData.ID) === String(claimId)) {
+      selectedClaimData.holdHistory = updatedHistory;
+      _applyHoldLockState();
+    }
+
+    renderClaimsTable();
+
+    const url = (typeof SAVE_HOLD_URL !== 'undefined') ? SAVE_HOLD_URL : '';
+    if (url && !url.startsWith('PASTE_') && claimId) {
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: claimId.toString(),
+            action: action,
+            date: new Date().toISOString(),
+            reason: reason || '',
+            holdHistory: updatedHistory,
+          })
+        });
+      } catch (e) {
+        console.log('[Hold] fetch threw — likely CORS or network failure (CORS suppressed):', e);
+      }
+    }
+  }
+
+  let _holdModalClaim = null;
+
+  /** Opens the Hold reason modal for one claim (called from the Active
+   *  Claims Queue row button). Reason is required — submitHoldReason()
+   *  refuses to proceed on an empty/whitespace-only value. */
+  function openHoldReasonModal(claim) {
+    _holdModalClaim = claim;
+    const input = document.getElementById('holdReasonInput');
+    if (input) input.value = '';
+    const err = document.getElementById('holdReasonError');
+    if (err) err.style.display = 'none';
+    const modal = document.getElementById('holdReasonModal');
+    if (modal) modal.style.display = 'flex';
+  }
+
+  function closeHoldReasonModal() {
+    _holdModalClaim = null;
+    const modal = document.getElementById('holdReasonModal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  async function submitHoldReason() {
+    const input = document.getElementById('holdReasonInput');
+    const reason = input ? input.value.trim() : '';
+    if (!reason) {
+      const err = document.getElementById('holdReasonError');
+      if (err) err.style.display = 'block';
+      return;
+    }
+    const claim = _holdModalClaim;
+    closeHoldReasonModal();
+    if (claim) await _recordHoldEvent(claim, 'HOLD', reason);
+  }
+
+  /** Continue button — no reason prompt (only Hold requires one, per the
+   *  user's request), just records the click and resumes counting. */
+  async function continueClaimHold(claim) {
+    if (claim) await _recordHoldEvent(claim, 'CONTINUE', '');
+  }
+
+  /** Locks/unlocks every input control inside the Investigation workspace
+   *  based on the CURRENTLY OPEN claim's hold state. Deliberately coarse
+   *  (every input/textarea/select/button inside #investigationContent,
+   *  not a per-tab allowlist) — matches the user's own "the all input box
+   *  of interface investigation are not allow to input" wording, and is
+   *  far less likely to miss a field than hand-picking which ones to lock. */
+  function _applyHoldLockState() {
+    const content = document.getElementById('investigationContent');
+    if (!content) return;
+    const banner = document.getElementById('holdLockBanner');
+    const state = selectedClaimData ? getClaimHoldState(selectedClaimData) : { onHold: false };
+    if (banner) {
+      banner.style.display = state.onHold ? 'flex' : 'none';
+      if (state.onHold) {
+        const dateStr = formatDateDisplay(state.holdDate);
+        document.getElementById('holdLockBannerText').textContent =
+          `⏸ On hold since ${dateStr} — ${state.holdReason || ''} — response time is paused. Team Leader must click Continue (Active Claims Queue) before investigation input can resume.`;
+      }
+    }
+    content.querySelectorAll('input, textarea, select, button').forEach(el => {
+      // Never lock the tab switcher — Team Leader/Player still need to be
+      // able to LOOK at every tab while on hold, just not type/click into
+      // the actual investigation controls.
+      if (el.classList.contains('tab-btn')) return;
+      el.disabled = state.onHold;
+    });
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
@@ -8656,7 +8906,7 @@
     const alreadyClosed = !!existingCloseRaw;
     const closeDate = alreadyClosed ? new Date(existingCloseRaw) : new Date();
 
-    const claimTakeTime = startRaw ? calculateClaimTakeTime(startRaw, closeDate) : 0;
+    const claimTakeTime = startRaw ? calculateClaimTakeTime(startRaw, closeDate, getClaimHoldPeriods(claimData)) : 0;
     const closeDateIso  = closeDate.toISOString();
 
     // Performance score reuses this SAME claimTakeTime value — never re-derived.
@@ -9531,6 +9781,7 @@
       document.getElementById('startGate').style.display = 'none';
       document.getElementById('investigationContent').style.display = 'flex';
       loadPlayerRoster();
+      _applyHoldLockState();
     }
 
     showPage('investigation');
@@ -9625,7 +9876,8 @@
       closeDateRaw, closeDateDisplay: closeDateRaw ? formatDateDisplay(closeDateRaw) : '—',
       responseTimeRaw, responseTimeDisplay,
       shop: shopVal,
-      statusLabel, statusClass,
+      statusLabel, statusClass, rawStatus,
+      holdState: getClaimHoldState(claim),
     };
   }
 
@@ -9661,7 +9913,7 @@
   function renderClaimsTable(){
     const tbody = document.getElementById('claimsTableBody');
     if (!activeClaimsList || !activeClaimsList.length){
-      tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:30px;color:var(--charcoal-soft);">No claims found.</td></tr>';
+      tbody.innerHTML='<tr><td colspan="13" style="text-align:center;padding:30px;color:var(--charcoal-soft);">No claims found.</td></tr>';
       return;
     }
 
@@ -9690,7 +9942,7 @@
     }
 
     if (!rows.length){
-      tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:30px;color:var(--charcoal-soft);">No claims match the current filters.</td></tr>';
+      tbody.innerHTML='<tr><td colspan="13" style="text-align:center;padding:30px;color:var(--charcoal-soft);">No claims match the current filters.</td></tr>';
       return;
     }
 
@@ -9722,7 +9974,33 @@
         <td style="font-size:11px;white-space:nowrap;font-weight:700;">${r.responseTimeRaw!==null?r.responseTimeDisplay:'<span style="color:var(--charcoal-soft);font-size:10px;">—</span>'}</td>
         <td style="font-size:11px;">${r.shop}</td>
         <td><span class="status-badge ${r.statusClass}">${r.statusLabel}</span></td>
+        <td class="hold-cell"></td>
       `;
+      // Hold/Continue button is built as a real DOM node (not innerHTML)
+      // so its click handler can stopPropagation cleanly without a global
+      // onclick= string needing to re-look-up the claim by id.
+      const holdCell = tr.querySelector('.hold-cell');
+      if (r.rawStatus === 'QC Investigated') {
+        // Claim already closed out — nothing to hold, matches the user's
+        // explicit "except claim case that QC Investigated" carve-out.
+        holdCell.innerHTML = '<span style="color:var(--charcoal-soft);font-size:10px;">—</span>';
+      } else {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn';
+        btn.style.cssText = 'width:auto;padding:6px 12px;font-size:11px;white-space:nowrap;'
+          + (r.holdState.onHold ? 'background:var(--red);color:#fff;' : 'background:var(--surface-2);color:var(--charcoal);');
+        btn.textContent = r.holdState.onHold ? '▶ Continue' : '⏸ Hold';
+        btn.title = r.holdState.onHold
+          ? `On hold since ${formatDateDisplay(r.holdState.holdDate)} — ${r.holdState.holdReason || ''}`
+          : 'Stop counting response time for investigation';
+        btn.onclick = function(e){
+          e.stopPropagation();
+          if (r.holdState.onHold) continueClaimHold(r.claim);
+          else openHoldReasonModal(r.claim);
+        };
+        holdCell.appendChild(btn);
+      }
       tbody.appendChild(tr);
     });
 
@@ -9849,7 +10127,7 @@
      opened from a local file:// path, where fetch() is blocked entirely. */
   async function fetchClaims(){
     const tbody=document.getElementById('claimsTableBody');
-    tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:30px;">Refreshing claims from Microsoft List...</td></tr>';
+    tbody.innerHTML='<tr><td colspan="13" style="text-align:center;padding:30px;">Refreshing claims from Microsoft List...</td></tr>';
 
     // Ask PAD Desktop to regenerate claims.js from the Microsoft List
     // BEFORE reading it. Without this, fetchClaims() just re-reads
@@ -9895,7 +10173,7 @@
       renderClaimsTable();
     }).catch((e) => {
       console.error('[fetchClaims] Failed to load claims.js:', e);
-      tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:30px;color:red;">Error loading claims.js</td></tr>';
+      tbody.innerHTML='<tr><td colspan="13" style="text-align:center;padding:30px;color:red;">Error loading claims.js</td></tr>';
     });
   }
 
