@@ -10461,11 +10461,12 @@
    *  SEND_DUE_REMINDER_URL is still the unconfigured placeholder. */
   // How often this app is willing to fire the reminder at all, regardless
   // of how many times someone opens/refreshes it — a single GLOBAL cooldown
-  // (not per-claim, not per-day): "remind only 1 time per 4 hours; if a
-  // user opens the app again once 4 hours have passed since the last
-  // reminder, remind again" (still-overdue claims are re-sent every cycle,
-  // same as clicking Refresh wouldn't re-trigger it moments later).
-  const DUE_REMINDER_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours
+  // (not per-claim): "remind only 1 time per day; if a user opens the app
+  // again once 24 hours have passed since the last reminder, remind
+  // again" (still-overdue claims are re-sent every cycle, same as clicking
+  // Refresh wouldn't re-trigger it moments later). Was briefly 4 hours,
+  // revised per follow-up request to a full day.
+  const DUE_REMINDER_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 1 day
   const DUE_REMINDER_LAST_RUN_KEY = 'qc_lastDueReminderRunAt';
 
   function checkOverdueActionsAndNotify() {
@@ -10473,14 +10474,14 @@
       ? SEND_DUE_REMINDER_URL : null;
     if (!url) return; // not configured yet — see SEND_DUE_REMINDER_URL's comment
 
-    // Global 4-hour gate — checked FIRST, before touching claims.js data at
-    // all, so an open within the cooldown window does nothing whatsoever
-    // (no fetches, no console noise) rather than silently re-deduping per
-    // claim like the old once-a-day version did.
+    // Global 24-hour gate — checked FIRST, before touching claims.js data
+    // at all, so an open within the cooldown window does nothing
+    // whatsoever (no fetches, no console noise) rather than silently
+    // re-deduping per claim like the original once-a-day version did.
     const lastRun = Number(localStorage.getItem(DUE_REMINDER_LAST_RUN_KEY) || 0);
     const msSinceLastRun = Date.now() - lastRun;
     if (lastRun && msSinceLastRun < DUE_REMINDER_COOLDOWN_MS) {
-      console.log(`[DueReminder] Skipped — last reminder run ${Math.round(msSinceLastRun / 60000)} min ago, cooldown is 4h.`);
+      console.log(`[DueReminder] Skipped — last reminder run ${Math.round(msSinceLastRun / 60000)} min ago, cooldown is 24h.`);
       return;
     }
 
