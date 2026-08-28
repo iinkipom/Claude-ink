@@ -1161,7 +1161,7 @@
             <div class="sb-plaque-val sb-font-digit" id="sbTopLow">0</div>
           </div>
           <div class="sb-plaque perf">
-            <div class="sb-plaque-label">Performance<small>Point vs. Target ratio</small></div>
+            <div class="sb-plaque-label">Performance<small id="sbPerfResultBadge">Point vs. Target ratio</small></div>
             <div class="sb-plaque-val sb-font-digit" id="sbPerformance">—</div>
           </div>
         </div>
@@ -1305,9 +1305,13 @@
          is one WEEK, so this breaks it down day by day. -->
     <div id="tgDayDetailModal" class="tg-day-modal-overlay" style="display:none;" onclick="if(event.target===this)closeTgDayDetailModal()">
       <div class="tg-day-modal-card">
-        <h3 id="tgDayDetailTitle">—</h3>
+        <div class="tg-day-modal-head">
+          <h3 id="tgDayDetailTitle">—</h3>
+          <span id="tgDayDetailResultBadge" class="tg-result-badge"></span>
+        </div>
         <div class="tg-day-modal-sub">Running Point / Target total (matches the chart line) — small numbers are that day's own contribution</div>
         <div id="tgDayDetailBody"></div>
+        <div id="tgDayDetailAnalysis" class="tg-analysis" style="display:none;"></div>
         <div class="tg-day-modal-actions">
           <button type="button" class="tg-day-modal-close" onclick="closeTgDayDetailModal()">Close</button>
         </div>
@@ -7353,6 +7357,16 @@
     const perfLabel = (perfPct === null) ? (totalTarget > 0 || totalPoint !== 0 ? '—' : 'NO DATA YET') : `${perfPct}% OF TARGET`;
     setText('sbHeroPerfRate', perfLabel);
     setText('sbPerformance', perfPct === null ? '—' : `${perfPct}%`);
+    // WIN/LOSE/ALMOST verdict for the active period — same classification
+    // Team Graph's hover tooltip/day-detail modal use (see
+    // _classifyPeriodResult()'s comment), so the two pages always agree
+    // on what counts as a win here.
+    const perfResult = _classifyPeriodResult(totalPoint, totalTarget);
+    const perfBadgeEl = document.getElementById('sbPerfResultBadge');
+    if (perfBadgeEl) {
+      perfBadgeEl.textContent = perfResult.key === 'NO_DATA' ? 'Point vs. Target ratio' : `${perfResult.emoji} ${perfResult.label}`;
+      perfBadgeEl.style.color = perfResult.key === 'NO_DATA' ? '' : perfResult.color;
+    }
 
     // ---- Period tally strip heading ----
     const periodMonthEl = document.getElementById('sbPeriodMonth');
@@ -7689,6 +7703,96 @@
    *  isolated total. */
   let _tgRenderBuckets = null;
 
+  /* ══════════════════════════════════════════════════════════════════════════
+     WIN / LOSE PERIOD ANALYSIS — "does this period's Point beat its Target,
+     and if not (or barely), what caused that?" Shared by the Team Graph
+     hover tooltip, its day-detail modal, and the Scoreboard's Performance
+     plaque, via _classifyPeriodResult() (the WIN/LOSE/ALMOST verdict) and
+     _analyzePeriodCauses() (the root-cause breakdown for anything short of
+     a comfortable WIN). ══════════════════════════════════════════════════ */
+
+  /** How close to 1.0 (Point/Target) counts as "almost" rather than a
+   *  clean win/lose — a ±10% band around break-even. Tune this one
+   *  constant to widen/narrow what counts as "almost". */
+  const PERIOD_RESULT_MARGIN = 0.10;
+
+  /** Point vs Target verdict for one period. target<=0 means nothing was
+   *  even issued yet this period — there's no ratio to judge, so that's
+   *  its own NO_DATA case rather than forcing it into LOSE.
+   *    ratio > 1+margin   -> WIN          (comfortably ahead)
+   *    1 < ratio <= 1+margin -> ALMOST_LOSE  (ahead, but one bad case from flipping)
+   *    ratio === 1        -> EQUAL
+   *    1-margin <= ratio < 1 -> ALMOST_WIN   (behind, but close to catching up)
+   *    ratio < 1-margin   -> LOSE          (comfortably behind) */
+  function _classifyPeriodResult(point, target) {
+    if (!target || target <= 0) return { key: 'NO_DATA', label: 'No Data', emoji: '—', color: '#9a9aa4' };
+    const ratio = point / target;
+    if (ratio === 1) return { key: 'EQUAL', label: 'Equal', emoji: '⚖️', color: '#a3a3ad' };
+    if (ratio > 1 + PERIOD_RESULT_MARGIN) return { key: 'WIN', label: 'Win', emoji: '🏆', color: '#19d575' };
+    if (ratio > 1) return { key: 'ALMOST_LOSE', label: 'Almost Lose', emoji: '⚠️', color: '#ffb238' };
+    if (ratio >= 1 - PERIOD_RESULT_MARGIN) return { key: 'ALMOST_WIN', label: 'Almost Win', emoji: '🔶', color: '#ff8a3d' };
+    return { key: 'LOSE', label: 'Lose', emoji: '🔻', color: '#ff5b7a' };
+  }
+
+  /** Root-cause breakdown for one Team Graph bucket, given its real
+   *  calendar day range (see _teamGraphDateRangeForBucket()). Splits every
+   *  claim touching that period into two groups:
+   *    closedInPeriod — claims that CLOSED (and scored) in this period,
+   *                     sorted ascending so the biggest drags on Point
+   *                     come first
+   *    pendingInPeriod — claims ISSUED in this period that are still
+   *                     open (no CloseDate at all yet) — these already
+   *                     count toward Target but haven't had a chance to
+   *                     contribute to Point yet, which is very often the
+   *                     real reason a still-in-progress period reads as
+   *                     LOSE/ALMOST rather than any case scoring badly
+   *  Also returns `gap` — how many more Point are needed to reach Target
+   *  (i.e. break even) — 0 or negative once the period is already a WIN. */
+  function _analyzePeriodCauses(bucketIndex) {
+    const days = _teamGraphDateRangeForBucket(bucketIndex);
+    if (!days.length) return null;
+    const claims = (typeof ACTIVE_CLAIMS_DATABASE !== 'undefined' && Array.isArray(ACTIVE_CLAIMS_DATABASE))
+      ? ACTIVE_CLAIMS_DATABASE
+      : (Array.isArray(activeClaimsList) ? activeClaimsList : []);
+    const inRange = (d) => days.some(day => d.getFullYear() === day.getFullYear() && d.getMonth() === day.getMonth() && d.getDate() === day.getDate());
+
+    const closedInPeriod = [];
+    const pendingInPeriod = [];
+    claims.forEach(c => {
+      const issueDate = _toDateOrNull(resolveField(c, ['issueDate', 'IssueDate'], ''));
+      const closeDate = _toDateOrNull(resolveField(c, ['closeDate', 'CloseDate'], ''));
+      const id = c.id || c.ID || '?';
+      const subject = resolveField(c, ['Subject', 'subject'], '');
+      if (closeDate && inRange(closeDate)) {
+        const totalRaw = resolveField(c, ['totalScore', 'TotalScore'], '');
+        const total = Number(totalRaw);
+        if (!isNaN(total) && totalRaw !== '') closedInPeriod.push({ id, subject, score: total });
+      }
+      if (issueDate && inRange(issueDate) && !closeDate) {
+        pendingInPeriod.push({ id, subject, status: resolveField(c, ['status', 'Status'], '') });
+      }
+    });
+    closedInPeriod.sort((a, b) => a.score - b.score);
+
+    const { periodPoint, periodTarget } = _periodSlicePointTarget(bucketIndex);
+    const gap = periodTarget - periodPoint;
+    const result = _classifyPeriodResult(periodPoint, periodTarget);
+
+    return { closedInPeriod, pendingInPeriod, periodPoint, periodTarget, gap, result };
+  }
+
+  /** This bucket's OWN slice of Point/Target — bucket minus the previous
+   *  bucket's cumulative total — i.e. "what happened in just this period",
+   *  not the running total the chart line plots. O(1) (just an array
+   *  lookup + subtraction), unlike _analyzePeriodCauses() which scans
+   *  every claim — safe to call on every mousemove for the hover tooltip,
+   *  where the heavier per-claim breakdown would be wasteful. */
+  function _periodSlicePointTarget(bucketIndex) {
+    const bucket = (_tgRenderBuckets && _tgRenderBuckets[bucketIndex]) || { point: 0, target: 0 };
+    const prevBucket = (bucketIndex > 0 && _tgRenderBuckets && _tgRenderBuckets[bucketIndex - 1]) || { point: 0, target: 0 };
+    return { periodPoint: bucket.point - prevBucket.point, periodTarget: bucket.target - prevBucket.target };
+  }
+
   function _computeTeamGraphData() {
     const now = tgHistoryDate || new Date(); // history anchor, if the user picked one — otherwise live "now"
     _tgRenderNow = now;
@@ -7855,6 +7959,48 @@
           <span class="tg-day-stat tg">${r.target}tg${r.dayTarget ? ` <small>(+${r.dayTarget})</small>` : ''}</span>
           <span class="tg-day-stat cases">${r.closedCount} closed${r.closedLabels.length ? ' — ' + escapeHtml(r.closedLabels.join(', ')) : ''}</span>
         </div>`).join('');
+    }
+
+    // ---- Result badge + root-cause analysis (see _analyzePeriodCauses()'s
+    // own comment for what "this period's own slice" means and why it's
+    // computed separately from the running totals shown in the rows above) ----
+    const analysis = _analyzePeriodCauses(bucketIndex);
+    const badgeEl = document.getElementById('tgDayDetailResultBadge');
+    const analysisEl = document.getElementById('tgDayDetailAnalysis');
+    if (analysis && badgeEl) {
+      const { result } = analysis;
+      badgeEl.textContent = `${result.emoji} ${result.label}`;
+      badgeEl.style.color = result.color;
+      badgeEl.style.background = result.color + '22'; // ~13% tint of the result color, hex alpha suffix
+    }
+    // Only worth explaining anything short of a comfortable WIN — a real
+    // WIN doesn't need a "why", and NO_DATA has nothing to analyze yet.
+    if (analysis && analysisEl && ['LOSE', 'ALMOST_LOSE', 'ALMOST_WIN', 'EQUAL'].includes(analysis.result.key)) {
+      const { closedInPeriod, pendingInPeriod, gap } = analysis;
+      let html = `<div class="tg-analysis-title">Why ${escapeHtml(analysis.result.label)}?</div>`;
+      if (gap > 0) {
+        html += `<div class="tg-analysis-line">Needs <strong>${gap} more point${gap === 1 ? '' : 's'}</strong> this period to reach Target.</div>`;
+      }
+      if (closedInPeriod.length) {
+        const lowest = closedInPeriod.slice(0, 3);
+        html += `<div class="tg-analysis-line">Lowest-scoring closed case(s) this period — biggest drag on Point:</div><ul class="tg-analysis-list">`;
+        html += lowest.map(c => `<li><span class="score">${c.score}pt</span>#${escapeHtml(String(c.id))}${c.subject ? ' — ' + escapeHtml(c.subject) : ''}</li>`).join('');
+        html += `</ul>`;
+        if (gap > 0) {
+          const worst = lowest[0];
+          html += `<div class="tg-analysis-line">If #${escapeHtml(String(worst.id))} had scored <strong>${worst.score + gap}pt</strong> instead of ${worst.score}pt, this period would have hit Target.</div>`;
+        }
+      }
+      if (pendingInPeriod.length) {
+        html += `<div class="tg-analysis-line"><strong>${pendingInPeriod.length} case(s)</strong> issued this period ${pendingInPeriod.length === 1 ? 'is' : 'are'} still open (not yet closed) — already counted into Target, but haven't had a chance to contribute Point yet: ${pendingInPeriod.map(c => `#${escapeHtml(String(c.id))}`).join(', ')}.</div>`;
+      }
+      if (!closedInPeriod.length && !pendingInPeriod.length) {
+        html += `<div class="tg-analysis-empty">No case activity found in this specific period — Target came from cases issued here with no matching closed/open record.</div>`;
+      }
+      analysisEl.innerHTML = html;
+      analysisEl.style.display = 'block';
+    } else if (analysisEl) {
+      analysisEl.style.display = 'none';
     }
 
     const modal = document.getElementById('tgDayDetailModal');
@@ -8063,7 +8209,14 @@
       scrubber.style.opacity = '1';
       svg.querySelectorAll('.tg-dot').forEach(d => d.classList.toggle('is-active', Number(d.dataset.i) === i));
       if (tooltip) {
-        tooltip.innerHTML = `<strong>${labels[i]}</strong><span class="pt">PT ${buckets[i].point}</span><span class="tg">TG ${buckets[i].target}</span>`;
+        // Classified on THIS period's own slice (bucket minus the previous
+        // bucket's cumulative total), not the running total shown as
+        // PT/TG below — "did THIS week/month beat its own target",
+        // matching how Scoreboard's Point/Target hero already reads per
+        // the active view mode, not "beat the total-so-far".
+        const { periodPoint, periodTarget } = _periodSlicePointTarget(i);
+        const result = _classifyPeriodResult(periodPoint, periodTarget);
+        tooltip.innerHTML = `<strong>${labels[i]}</strong><span class="pt">PT ${buckets[i].point}</span><span class="tg">TG ${buckets[i].target}</span><span class="tg-result" style="color:${result.color};">${result.emoji} ${result.label}</span>`;
         // Wide mode: SVG width is 1:1 with viewBox units (no CSS scaling),
         // so the point's x coordinate IS its pixel offset within the
         // scrollable content — matches how the tooltip (an absolutely

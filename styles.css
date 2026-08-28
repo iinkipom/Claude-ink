@@ -2827,6 +2827,7 @@ textarea.form-control {
 .tg-tooltip span { font-family: 'Orbitron', var(--font-body); font-size: 10.5px; font-weight: 700; }
 .tg-tooltip span.pt { color: #ffd9a0; }
 .tg-tooltip span.tg { color: #a3d4ff; }
+.tg-tooltip span.tg-result { font-size: 10px; font-weight: 800; margin-top: 1px; }
 
 .tg-chart-hint {
   text-align: center;
@@ -2859,6 +2860,7 @@ textarea.form-control {
   max-height: 80vh;
   overflow-y: auto;
 }
+.tg-day-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .tg-day-modal-card h3 {
   font-family: var(--font-display);
   font-size: 17px;
@@ -2867,6 +2869,29 @@ textarea.form-control {
   margin-bottom: 4px;
 }
 .tg-day-modal-sub { font-size: 12px; color: rgba(255,255,255,0.5); margin-bottom: 14px; }
+.tg-result-badge {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 5px 12px;
+  border-radius: var(--r-full);
+  background: rgba(255,255,255,0.08);
+  white-space: nowrap;
+}
+.tg-analysis {
+  margin-top: 16px;
+  padding: 14px 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: var(--r-md);
+}
+.tg-analysis-title { font-size: 12.5px; font-weight: 800; color: #ffd9a0; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.4px; }
+.tg-analysis-line { font-size: 12.5px; color: rgba(255,255,255,0.85); margin-bottom: 6px; line-height: 1.5; }
+.tg-analysis-list { margin: 4px 0 10px 0; padding: 0; list-style: none; }
+.tg-analysis-list li { font-size: 12px; color: rgba(255,255,255,0.75); padding: 5px 0; border-bottom: 1px dashed rgba(255,255,255,0.08); }
+.tg-analysis-list li:last-child { border-bottom: none; }
+.tg-analysis-list li .score { font-family: 'Orbitron', var(--font-body); font-weight: 800; color: #ff5b7a; margin-right: 8px; }
+.tg-analysis-empty { font-size: 12px; color: rgba(255,255,255,0.5); font-style: italic; }
 .tg-day-row {
   display: grid;
   grid-template-columns: 96px 56px 56px 1fr;
