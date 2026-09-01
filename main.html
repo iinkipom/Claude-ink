@@ -734,10 +734,14 @@
 
           <!-- TAB 3: INSPECTION -->
           <div id="tabInspection" class="tab-content">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
               <label style="font-weight:700; font-size:14px; color:var(--charcoal);">Inspection Results</label>
-              <button class="btn" style="width:auto; padding:6px 16px; font-size:12px; background:var(--surface-2); color:var(--charcoal);" onclick="addInspectionBlock()">+ Add Inspection Detail & Picture</button>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <button id="referClaimBtn" class="btn" style="width:auto; padding:6px 16px; font-size:12px; background:var(--charcoal); color:#fff;" onclick="openReferClaimModal()" title="Auto-fill Inspection, Trouble Analysis and Considerations from a past claim case">🔗 Refer Claim Case</button>
+                <button class="btn" style="width:auto; padding:6px 16px; font-size:12px; background:var(--surface-2); color:var(--charcoal);" onclick="addInspectionBlock()">+ Add Inspection Detail & Picture</button>
+              </div>
             </div>
+            <div id="referredFromBanner" style="display:none; margin-bottom:14px; padding:8px 14px; background:#eef3ff; border:1px solid #c3d4fb; border-radius:var(--r-md); font-size:11.5px; color:#2b4c9b; font-weight:700;"></div>
             <div id="inspectionBlocksWrap"></div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; flex-wrap:wrap; gap:10px;">
               <button class="btn" style="width:auto; padding:10px 24px; background:var(--surface-2); color:var(--charcoal);" onclick="submitInspection(this)">💾 Submit Inspection</button>
@@ -1273,6 +1277,23 @@
       </div>
     </div>
 
+    <!-- REFER CLAIM CASE MODAL — Inspection tab's "Refer Claim Case" button.
+         Team Leader picks a past claim; applyReferredClaim() auto-fills
+         Inspection/Trouble Analysis/Considerations from it (still editable
+         afterward — this only pre-fills, nothing is locked). -->
+    <div id="referClaimModal" class="sb-modal-overlay" style="display:none;" onclick="if(event.target===this)closeReferClaimModal()">
+      <div class="sb-modal-card" style="max-width:560px;">
+        <h3>🔗 Refer a Past Claim Case</h3>
+        <p>Pick a previous claim case to auto-fill Inspection, Trouble Analysis and Considerations from it. Everything stays fully editable afterward — this only pre-fills a starting point.</p>
+        <label for="referClaimSearch">Search by Claim No. or Subject</label>
+        <input type="text" id="referClaimSearch" class="form-control" placeholder="Type to search…" oninput="renderReferClaimList(this.value)" />
+        <div id="referClaimList" style="margin-top:12px; max-height:320px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+        <div class="sb-modal-actions">
+          <button type="button" class="sb-modal-cancel" onclick="closeReferClaimModal()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <div id="pagTeamGraph" class="page-body sb-page" style="display:none;">
       <div class="sb-board">
         <div class="sb-board-inner">
@@ -1492,6 +1513,18 @@
   // report, Evaluate) should render them with line breaks preserved
   // (e.g. CSS white-space:pre-line) rather than as flattened one-liners.
   const CLAIM_SUBMIT_URL    = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/2ec9a8be48184c1d879cf92732f3931e/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=P8_UCocRwFhbHJPNYl1bDliQTgpta6CJ_QcB6ddfw9s";
+  // Refer Claim Case (added per request — Inspection tab's "🔗 Refer Claim
+  // Case" button): saveInvestigation()'s payload now also sends
+  // `referredFrom` (string — the Subject of whichever past claim this
+  // claim's Inspection/Trouble Analysis/Considerations were auto-filled
+  // from, or '' if never referred — see applyReferredClaim()). Needs a
+  // matching "ReferredFrom" SharePoint column (Single line of text)
+  // mapped in this flow's Update item action, AND added to claims.js's
+  // own Select action too (same as any other field this app reads back) —
+  // otherwise the "🔗 Referred from: ..." banner and the "Refer
+  // Investigation Report - <subject>" remark under Consideration on the
+  // generated PDF only work for the rest of THIS session, not after a
+  // reopen/reload.
   const SAVE_INVESTIGATION_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/b3ef405d3d6a46dba91ab63eaf98bb71/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=9IiYnbL80DtRGn6C-tsPeOl1G38ImgmwuQV2GRPnh1Y";
   const SAVE_FINDING_RISK_URL  = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/aa0cd16f30094734aafb0a03823597e1/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=5gh7GRMm45XHHAMfELhzqRYVajc8fg8tjCmb93w--Os";
   // Add your START_CLAIM_URL here (Power Automate flow that records StartDate + sets status)
@@ -9443,7 +9476,18 @@
         status:                    (selectedClaimData?.status) || 'Investigating',
         investigationImagesBase64: invImagesBase64,
         deletedInspectionImages:   JSON.stringify(deletedInspectionImages),
-        deletedActionImages:       JSON.stringify(deletedActionImages)
+        deletedActionImages:       JSON.stringify(deletedActionImages),
+        // Refer Claim Case — which past claim's Subject (if any) this
+        // claim's Inspection/Trouble Analysis/Considerations were
+        // auto-filled from (see applyReferredClaim()). Needs a matching
+        // "ReferredFrom" Single line of text column on the Claims list,
+        // mapped through in this flow's Update item AND in claims.js's own
+        // Select action (same as any other field this app reads back) so
+        // the banner/report remark survive a reopen, not just this
+        // session. Sent as '' (not omitted) once set, so a claim that
+        // WAS referred from something can still have that cleared by a
+        // future "un-refer" action if one is ever added.
+        referredFrom:              _referredFromSubject || ''
       };
 
       await fetch(SAVE_INVESTIGATION_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
@@ -9597,6 +9641,17 @@
     const evalUnlockedReset = document.getElementById('evaluateUnlocked');
     if (evalLockedReset) evalLockedReset.style.display = 'none';
     if (evalUnlockedReset) evalUnlockedReset.style.display = 'none';
+
+    // Refer Claim Case — restore whichever past claim (if any) this claim
+    // was already referred from (persisted via saveInvestigation()'s
+    // `referredFrom` field), so the banner survives a reopen/reload, not
+    // just the same session the Refer button was clicked in.
+    _referredFromSubject = resolveField(claim, ['referredFrom', 'ReferredFrom'], '') || null;
+    const referredBanner = document.getElementById('referredFromBanner');
+    if (referredBanner) {
+      referredBanner.style.display = _referredFromSubject ? 'block' : 'none';
+      if (_referredFromSubject) referredBanner.textContent = `🔗 Referred from: ${_referredFromSubject} — edit anything below as needed, then Save/Submit as normal.`;
+    }
 
     refreshClaimMonitorDisplay();
 
@@ -9786,6 +9841,178 @@
 
     showPage('investigation');
     switchTab('tabPlayers', null);
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     REFER CLAIM CASE — Team Leader picks a past claim case (Inspection
+     tab's "Refer Claim Case" button) and auto-fills Inspection, Trouble
+     Analysis and Considerations from it, reusing the EXACT SAME field-
+     parsing logic openInvestigationWorkspace() already uses to restore a
+     claim's OWN saved data — just pointed at a DIFFERENT (source) claim's
+     raw fields, applied on top of the CURRENTLY open claim's workspace.
+     Everything stays fully editable afterward — these are the same
+     textareas/inputs a normal investigation types into, nothing about
+     them changes just because they were pre-filled this way.
+
+     Pictures: routed by the same InspBlockN_/ActCorrectiveN_/
+     ActPreventiveN_ filename-tag convention every other photo restore
+     already uses (restoreAllPreviewsFromUrls()), so on the next Save
+     they're freshly re-fetched/re-encoded and saved as THIS claim's own
+     photos — _resolveExistingPhotosForSave()'s existing "read whatever
+     <img> is actually in the container" fallback handles that
+     automatically, no special-casing needed. A referenced attachment that
+     ISN'T a real image fails to decode as an <img>, and
+     restorePreviewsFromUrls()'s existing onerror handler already swaps it
+     for a plain "view/download" link instead of a picture preview — which
+     naturally does NOT get picked up as a photo on save, exactly matching
+     "for the file just download the file, don't pull it in as a picture."
+     ═══════════════════════════════════════════════════════════════════════ */
+  let _referredFromSubject = null; // set when Refer Claim Case is used, or restored from the saved claim on reopen
+
+  function openReferClaimModal() {
+    const profile = JSON.parse(localStorage.getItem('userProfile')) || {};
+    if (profile.userType !== 'Team Leader') { alert('Only Team Leader can refer a past claim case.'); return; }
+    const searchInput = document.getElementById('referClaimSearch');
+    if (searchInput) searchInput.value = '';
+    renderReferClaimList('');
+    document.getElementById('referClaimModal').style.display = 'flex';
+  }
+
+  function closeReferClaimModal() {
+    document.getElementById('referClaimModal').style.display = 'none';
+  }
+
+  /** Lists every OTHER claim that actually has some investigation data
+   *  worth referring (Inspection text, Trouble Analysis, or an Action
+   *  Plan already saved on it), newest issue date first, filtered by the
+   *  search box against Claim No. and Subject. */
+  function renderReferClaimList(searchTerm) {
+    const wrap = document.getElementById('referClaimList');
+    const all = (typeof ACTIVE_CLAIMS_DATABASE !== 'undefined' && Array.isArray(ACTIVE_CLAIMS_DATABASE)) ? ACTIVE_CLAIMS_DATABASE : (Array.isArray(activeClaimsList) ? activeClaimsList : []);
+    const q = (searchTerm || '').trim().toLowerCase();
+
+    const candidates = all
+      .filter(c => String(c.id || c.ID) !== String(selectedClaimId))
+      .map((c, i) => {
+        const rowModel = getClaimRowModel(c, i);
+        const hasInspection = _hasTextData(resolveField(c, ['inspectionData','InspectionData','inspection_data'], ''));
+        const hasTrouble    = _hasTextData(resolveField(c, ['rootCauseAnalysis','RootCauseAnalysis','troubleAnalysis','TroubleAnalysis'], ''));
+        const hasActions    = _hasTextData(resolveField(c, ['actionPlan','ActionPlan','action_plan'], ''));
+        return { claim: c, rowModel, hasData: hasInspection || hasTrouble || hasActions };
+      })
+      .filter(r => r.hasData)
+      .filter(r => !q || r.rowModel.claimNo.toLowerCase().includes(q) || r.rowModel.subject.toLowerCase().includes(q))
+      .sort((a, b) => (b.rowModel.issueDateRaw ? new Date(b.rowModel.issueDateRaw).getTime() : 0) - (a.rowModel.issueDateRaw ? new Date(a.rowModel.issueDateRaw).getTime() : 0));
+
+    if (!candidates.length) {
+      wrap.innerHTML = `<div style="font-size:12px; color:var(--charcoal-soft); padding:12px 0;">No past claim cases with saved investigation data ${q ? 'match your search' : 'were found'}.</div>`;
+      return;
+    }
+
+    wrap.innerHTML = candidates.map(r => `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--border); border-radius:var(--r-md);">
+        <div style="min-width:0;">
+          <div style="font-weight:800; font-size:12px; color:var(--red);">${r.rowModel.claimNo}</div>
+          <div style="font-size:12px; color:var(--charcoal); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:340px;">${escapeHtml(r.rowModel.subject)}</div>
+        </div>
+        <button type="button" class="btn btn-red" style="width:auto; padding:6px 14px; font-size:11px; flex-shrink:0;" data-refer-id="${escapeHtml(String(r.claim.id || r.claim.ID))}">Refer</button>
+      </div>`).join('');
+
+    wrap.querySelectorAll('[data-refer-id]').forEach(btn => {
+      btn.onclick = () => {
+        const id = btn.getAttribute('data-refer-id');
+        const source = candidates.find(r => String(r.claim.id || r.claim.ID) === id)?.claim;
+        if (source) applyReferredClaim(source);
+      };
+    });
+  }
+
+  /** Does the actual auto-fill — see the section header comment above for
+   *  the full picture/file behavior explanation. */
+  function applyReferredClaim(sourceClaim) {
+    closeReferClaimModal();
+    if (!sourceClaim) return;
+    if (!confirm('This will OVERWRITE the current Inspection, Trouble Analysis and Considerations tabs with data from this claim case (everything stays editable afterward). Continue?')) return;
+
+    const subject      = resolveField(sourceClaim, ['Subject','subject'], 'N/A');
+    const invImgRaw     = sourceClaim.investigationImages || sourceClaim.InvestigationImages || sourceClaim.InvestigationIma || '';
+    const considImgRaw  = sourceClaim.considerationImages || sourceClaim.ConsiderationImages || '';
+
+    // ── Inspection blocks — same rebuild logic as openInvestigationWorkspace() ──
+    document.getElementById('inspectionBlocksWrap').innerHTML = ''; inspectionBlockCount = 0;
+    const rawInspect = resolveField(sourceClaim, ['inspectionData','InspectionData','inspection_data'], '');
+    const inspTextByBlock = _extractInspectionTextByBlock(rawInspect);
+    const inspImageBlockNums = _extractTaggedBlockNumbers(invImgRaw, /InspBlock(\d+)_/i)
+      .concat(_extractTaggedBlockNumbers(considImgRaw, /InspBlock(\d+)_/i));
+    const inspBlockNums = new Set([...Object.keys(inspTextByBlock).map(Number), ...inspImageBlockNums]);
+    if (inspBlockNums.size) {
+      const maxBlock = Math.max(...inspBlockNums);
+      for (let n = 1; n <= maxBlock; n++) {
+        addInspectionBlock();
+        if (inspTextByBlock[n]) document.getElementById(`inspText_${inspectionBlockCount}`).value = inspTextByBlock[n];
+      }
+    }
+    if (inspectionBlockCount === 0) addInspectionBlock();
+
+    // ── Root Cause / Outflow Whys ──
+    document.getElementById('rootWhyContainer').innerHTML = ''; rootWhyCount = 0; rootRealIndex = null;
+    const rcText = resolveField(sourceClaim, ['rootCauseAnalysis','RootCauseAnalysis','troubleAnalysis','TroubleAnalysis'], '');
+    if (rcText && rcText !== 'N/A') {
+      const parts = rcText.split(/Solution:\s*/i);
+      const m = parts[0].match(/Why\s*(\d+):\s*(.*?)(?:\s*\[REAL\])?$/gim);
+      if (m) m.forEach(line => { addSpecificWhyRow('rootWhyContainer','root'); const i = rootWhyCount; document.getElementById(`rootWhyInput_${i}`).value = line.replace(/Why \d+: /i,'').replace(' [REAL]','').trim(); if (line.includes('[REAL]')) markRealWhy(i,'root'); });
+    }
+    if (rootWhyCount === 0) addSpecificWhyRow('rootWhyContainer','root');
+
+    document.getElementById('outflowWhyContainer').innerHTML = ''; outflowWhyCount = 0; outflowRealIndex = null;
+    const ofText = resolveField(sourceClaim, ['outflowAnalysis','OutflowAnalysis','outFlow'], '');
+    if (ofText && ofText !== 'N/A') {
+      const m = ofText.match(/Why\s*(\d+):\s*(.*?)(?:\s*\[REAL\])?$/gim);
+      if (m) m.forEach(line => { addSpecificWhyRow('outflowWhyContainer','outflow'); const i = outflowWhyCount; document.getElementById(`outflowWhyInput_${i}`).value = line.replace(/Why \d+: /i,'').replace(' [REAL]','').trim(); if (line.includes('[REAL]')) markRealWhy(i,'outflow'); });
+    }
+    if (outflowWhyCount === 0) addSpecificWhyRow('outflowWhyContainer','outflow');
+
+    // ── Corrective / Preventive action blocks ──
+    document.getElementById('correctiveWrap').innerHTML = ''; document.getElementById('preventiveWrap').innerHTML = '';
+    const apText = resolveField(sourceClaim, ['actionPlan','ActionPlan','action_plan'], '');
+    [['Corrective','correctiveWrap'], ['Preventive','preventiveWrap']].forEach(([type, wrap]) => {
+      const textByBlock = _extractActionTextByBlock(apText, type);
+      const imageBlockNums = _extractTaggedBlockNumbers(invImgRaw, new RegExp(`Act${type}(\\d+)_`, 'i'))
+        .concat(_extractTaggedBlockNumbers(considImgRaw, new RegExp(`Act${type}(\\d+)_`, 'i')));
+      const blockNums = new Set([...Object.keys(textByBlock).map(Number), ...imageBlockNums]);
+      if (!blockNums.size) return;
+      const maxBlock = Math.max(...blockNums);
+      for (let n = 1; n <= maxBlock; n++) {
+        addActionBlock(wrap, type, n);
+        const entry = textByBlock[n];
+        if (entry) {
+          const b = document.getElementById(wrap).lastElementChild;
+          b.querySelector('.act-text').value = entry.text;
+          if (entry.eff && entry.eff !== 'TBD') b.querySelector('.act-eff').value = entry.eff;
+          if (entry.due && entry.due !== 'TBD') b.querySelector('.act-due').value = entry.due;
+        }
+      }
+    });
+
+    // ── Pictures — same routing-by-filename-tag as any other URL restore.
+    // Called AFTER the blocks above exist, so every inspPrev_N/
+    // actPrev_*_N container is already present to render into. Its own
+    // onerror fallback (see restorePreviewsFromUrls()) already downgrades
+    // a non-image URL to a plain download link instead of a broken
+    // picture — exactly the "picture vs just download the file" split
+    // requested, with zero special-casing needed here.
+    restoreAllPreviewsFromUrls(invImgRaw, considImgRaw);
+
+    // ── Remember what this claim was referred from, for the report remark ──
+    _referredFromSubject = subject;
+    if (selectedClaimData) selectedClaimData.referredFrom = subject;
+    const banner = document.getElementById('referredFromBanner');
+    if (banner) {
+      banner.style.display = 'block';
+      banner.textContent = `🔗 Referred from: ${subject} — edit anything below as needed, then Save/Submit as normal.`;
+    }
+
+    switchTab('tabInspection', document.querySelectorAll('.tab-btn')[2]);
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -12188,7 +12415,16 @@
       // ── Consideration Section ──
       const considerSection = document.createElement('div');
       considerSection.style.cssText = 'page-break-before:always; break-before:page;';
-      considerSection.innerHTML = `<div style="font-size:13px; font-weight:800; border-bottom:1px solid #171717; padding-bottom:3px; color:#DA0037; text-transform:uppercase; margin:12px 0 8px 0;">Consideration →</div>`;
+      // Refer Claim Case remark — only shown when this claim's Inspection/
+      // Trouble Analysis/Considerations were auto-filled from a past claim
+      // (see applyReferredClaim()/_referredFromSubject). Prefers the saved
+      // field (survives a reopen) with the in-memory value as a same-
+      // session fallback.
+      const referredSubjectForReport = resolveField(selectedClaimData, ['referredFrom','ReferredFrom'], '') || _referredFromSubject || '';
+      const referredRemarkHtml = referredSubjectForReport
+        ? `<div style="font-size:10.5px; font-style:italic; color:#444; margin-bottom:8px;">Refer Investigation Report - ${cleanText(referredSubjectForReport, '')}</div>`
+        : '';
+      considerSection.innerHTML = `<div style="font-size:13px; font-weight:800; border-bottom:1px solid #171717; padding-bottom:3px; color:#DA0037; text-transform:uppercase; margin:12px 0 8px 0;">Consideration →</div>${referredRemarkHtml}`;
       const actionBlocks = [...document.querySelectorAll('#correctiveWrap .action-block'), ...document.querySelectorAll('#preventiveWrap .action-block')];
       for (const b of actionBlocks) {
         const label   = b.querySelector('.action-header span')?.innerText || '';
