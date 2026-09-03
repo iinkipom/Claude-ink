@@ -1053,6 +1053,16 @@
       <div class="sb-roster-epic-glow"></div>
       <h3><span class="sb-roster-epic-icon">★</span> Player in Team</h3>
 
+      <!-- Shown whenever a past period is picked via the History modal
+           (see tgHistoryDate/tgViewMode, shared with Team Graph) — the
+           card scores below are recomputed for THAT period instead of
+           the live current month. Same "Back to Live" pattern as Team
+           Graph's own history banner. -->
+      <div id="sbRosterHistoryBanner" class="tg-history-banner" style="display:none;">
+        <span id="sbRosterHistoryBannerText">🕐 Viewing history — scores are not live</span>
+        <button type="button" onclick="tgViewLive(); renderScoreboard();">↩ Back to Live</button>
+      </div>
+
       <!-- Team formation, grouped by User Type — same section as the
            logged-in user only. 4Dx Mentor sits apart on its own row
            (left-aligned, like a coach standing off to the side of the
@@ -3403,38 +3413,67 @@
     return db.filter(e => _evaluateRecordMatchesUser(e, empId, firstName));
   }
 
-  /** This calendar month's {label: value(0-100)} scores for one roster
-   *  user, bucketed by week-of-month and averaged the same way
-   *  computeRadarScoresForPeriod('month') does for the logged-in user —
-   *  every week counts equally regardless of how many claims it holds. */
-  function computeMonthlyScoresForUser(u) {
-    const evals = _evaluationRecordsForUser(u);
-    const now = new Date();
-    const buckets = _buildPeriodBuckets(now, 'month');
-    const bucketEvals = Array.from({ length: buckets.count }, () => []);
-    evals.forEach(e => {
-      const d = _evaluateRecordDate(e);
-      if (!d) return;
-      const idx = buckets.classify(d);
-      if (idx >= 0) bucketEvals[idx].push(e);
+  /** This roster user's own EVALUATES_DATABASE rows for every claim that
+   *  was actually CLOSED within the given period — NOT filtered by when
+   *  the evaluation was submitted. Per request: a card's score should
+   *  reflect claims that closed that month, so a claim closed on the
+   *  30th but evaluated a few days into the next month still counts
+   *  toward the month it CLOSED in, and a claim evaluated same-day as
+   *  closing (the common case) works exactly the same either way. Needs
+   *  ACTIVE_CLAIMS_DATABASE to look up each evaluation's own claim's
+   *  CloseDate via its ClaimId. */
+  function _closedClaimEvalsForUser(u, refDate, mode) {
+    const { classify } = _buildPeriodBuckets(refDate, mode);
+    const claims = (typeof ACTIVE_CLAIMS_DATABASE !== 'undefined' && Array.isArray(ACTIVE_CLAIMS_DATABASE)) ? ACTIVE_CLAIMS_DATABASE : [];
+    const claimsById = new Map(claims.map(c => [String(c.id ?? c.ID ?? ''), c]));
+    return _evaluationRecordsForUser(u).filter(e => {
+      const claimId = String(e.ClaimId ?? e.claimId ?? e.ClaimID ?? '');
+      const claim = claimId ? claimsById.get(claimId) : null;
+      const closeDate = claim ? _toDateOrNull(resolveField(claim, ['closeDate', 'CloseDate'], '')) : null;
+      return !!(closeDate && classify(closeDate) >= 0);
     });
+  }
+
+  /** {label: value(0-100)} per-subject breakdown for one roster user's card
+   *  stat grid, scoped to the SAME period computeMonthlyOverallScoreForUser()
+   *  uses (live current month, or the History-picked period — see there).
+   *  A subject with no closed+evaluated claims in the period defaults to
+   *  RADAR_DEFAULT_MAX (100), same "starts at max until real data exists"
+   *  convention as the Profile page's own radar. */
+  function computeMonthlyScoresForUser(u) {
+    const refDate = tgHistoryDate || new Date();
+    const mode = tgHistoryDate ? tgViewMode : 'month';
+    const evals = _closedClaimEvalsForUser(u, refDate, mode);
     const scores = {};
     PERFORMANCE_LABELS.forEach(label => {
       const key = PERFORMANCE_LABEL_TO_KEY[label];
-      const bucketAverages = bucketEvals.map(evs => _avgEvaluateValue(evs, key)).filter(v => v !== null);
-      const avg = bucketAverages.length > 0 ? bucketAverages.reduce((a, b) => a + b, 0) / bucketAverages.length : null;
-      scores[label] = Math.round((avg ?? RADAR_DEFAULT_MAX) * 10) / 10;
+      const avg = _avgEvaluateValue(evals, key);
+      scores[label] = avg !== null ? Math.round(avg * 10) / 10 : RADAR_DEFAULT_MAX;
     });
     return scores;
   }
 
-  /** {overall, scores} for one roster user's current month — overall is the
-   *  plain average of the 5 subject scores, same formula the Profile page's
-   *  radarTotal uses. */
+  /** {overall, scores} for one roster user's roster card — per request:
+   *  "every 1st of the month, the total score resets to 100; once claims
+   *  close and get evaluated that month, average their total evaluate
+   *  score" — overall is the PLAIN AVERAGE of that user's own TotalScore
+   *  (submitEvaluation()'s per-claim 0-100 average across that role's
+   *  subjects) across every claim CLOSED in the period, defaulting to 100
+   *  when none have closed yet (a brand new month, or simply no claims
+   *  closed for this person yet in the picked period) — NOT a re-average
+   *  of the 5 subject scores, which would double-count each claim once
+   *  per subject instead of once overall.
+   *  Dynamically follows the Scoreboard/Team Graph History picker: reads
+   *  tgHistoryDate/tgViewMode (same shared anchor Team Graph's own chart
+   *  uses — set via the History modal's "Show on Team Graph" button), so
+   *  picking a past period updates these cards too, not just the chart. */
   function computeMonthlyOverallScoreForUser(u) {
+    const refDate = tgHistoryDate || new Date();
+    const mode = tgHistoryDate ? tgViewMode : 'month';
+    const evals = _closedClaimEvalsForUser(u, refDate, mode);
+    const totals = evals.map(e => Number(e.TotalScore ?? e.totalScore)).filter(v => !isNaN(v));
+    const overall = totals.length ? totals.reduce((a, b) => a + b, 0) / totals.length : RADAR_DEFAULT_MAX;
     const scores = computeMonthlyScoresForUser(u);
-    const vals = PERFORMANCE_LABELS.map(l => Number(scores[l]) || 0);
-    const overall = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
     return { overall, scores };
   }
 
@@ -7218,12 +7257,30 @@
       return t !== '4Dx Mentor' && t !== 'Team Leader';
     });
 
-    // ---- This month's overall score per Player/Team Leader (Mentors don't
-    //      self-evaluate — see EVALUATE_SUBJECTS' appliesTo — so their card
-    //      always stays the plain default design, unchanged). Every scored
-    //      Player/Team Leader gets ONE of 4 tiered card frames based on
-    //      where their OWN score falls — not "am I the top scorer", so
-    //      several teammates can share the same tier at once:
+    // ---- Roster History banner — shown whenever the History modal's
+    //      "Show on Team Graph" set a history anchor (tgHistoryDate),
+    //      shared with Team Graph itself, so the card scores below reflect
+    //      THAT period instead of the live current month. ----
+    const rosterHistoryBanner = document.getElementById('sbRosterHistoryBanner');
+    if (rosterHistoryBanner) {
+      rosterHistoryBanner.style.display = tgHistoryDate ? 'flex' : 'none';
+      if (tgHistoryDate) {
+        const modeLabel = { week: 'Weekly', month: 'Monthly', fy: 'Fiscal Year' }[tgViewMode] || tgViewMode;
+        const bannerTextEl = document.getElementById('sbRosterHistoryBannerText');
+        if (bannerTextEl) bannerTextEl.textContent = `🕐 Viewing history (${modeLabel}, anchored to ${formatDateDisplay(tgHistoryDate.toISOString())}) — scores are not live`;
+      }
+    }
+
+    // ---- This period's overall score per Player/Team Leader (Mentors
+    //      don't self-evaluate — see EVALUATE_SUBJECTS' appliesTo — so
+    //      their card always stays the plain default design, unchanged).
+    //      "This period" is the live current month by default, or
+    //      whatever period the History modal anchored to (tgHistoryDate/
+    //      tgViewMode, same shared state Team Graph's chart uses) — see
+    //      computeMonthlyOverallScoreForUser(). Every scored Player/Team
+    //      Leader gets ONE of 4 tiered card frames based on where their
+    //      OWN score falls — not "am I the top scorer", so several
+    //      teammates can share the same tier at once:
     //        50-69  -> "50 Score Up Frame" (tier50, silver)
     //        70-84  -> "70 Score Up Frame" (tier70, gold)
     //        85-94  -> "85 Score Up Frame" (tier85, icon white/gold)
