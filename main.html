@@ -10005,7 +10005,28 @@
 
     // ── Remember what this claim was referred from, for the report remark ──
     _referredFromSubject = subject;
-    if (selectedClaimData) selectedClaimData.referredFrom = subject;
+
+    // ── Sync selectedClaimData immediately, not just the DOM ──
+    // calculateSpecialScore() (Step 6 Evaluate's Special Point tier, and
+    // isLowTierFixedScore()/getEvaluateScoreRange() that read it) checks
+    // claim.inspectionData/rootCauseAnalysis/outflowAnalysis/actionPlan —
+    // the SAVED claim object — not whatever's currently sitting in the
+    // DOM's textareas. Without this, a claim that was just Referred (DOM
+    // populated) but not yet Saved/Submitted still reads as having NO
+    // Inspection/Trouble Analysis/Considerations data at all from
+    // calculateSpecialScore()'s point of view, so Special Score comes back
+    // 0 and Evaluate shows every subject fixed at 2 points even though the
+    // referred content is clearly visible on screen — exactly the bug
+    // reported ("alarm about special score 0 ... this is wrong"). Mirrors
+    // the same 4 fields saveInvestigation() persists after a real save, so
+    // there's no drift between "just referred" and "referred, then saved".
+    if (selectedClaimData) {
+      if (rawInspect) selectedClaimData.inspectionData    = rawInspect;
+      if (rcText)      selectedClaimData.rootCauseAnalysis = rcText;
+      if (ofText)      selectedClaimData.outflowAnalysis   = ofText;
+      if (apText)      selectedClaimData.actionPlan        = apText;
+      selectedClaimData.referredFrom = subject;
+    }
     const banner = document.getElementById('referredFromBanner');
     if (banner) {
       banner.style.display = 'block';
