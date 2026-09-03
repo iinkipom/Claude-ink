@@ -5156,6 +5156,20 @@
         body: JSON.stringify({ id: selectedClaimId.toString(), minutesMeetingDate: minutesMeetingDate, tabSave: 'minutesMeeting' })
       }).catch(function(e) { console.log('submitMinutesMeeting minutesMeetingDate save (CORS suppressed):', e); });
     }
+
+    // ── Also trigger "SmartQC - Save Investigation" (SAVE_INVESTIGATION_URL)
+    // — added per request. Before this, Submit Minutes Meeting only ever
+    // fired the minimal minutesMeetingDate update above (to SEND_APPOINTMENT_URL,
+    // since that's configured — the "falls back to SAVE_INVESTIGATION_URL"
+    // note above only applied while SEND_APPOINTMENT_URL was still a
+    // placeholder), so the full Inspection/Trouble Analysis/Considerations
+    // state — including anything just pulled in via Refer Claim Case, or
+    // typed in this session but not yet explicitly Saved — was NOT
+    // guaranteed to be persisted at this milestone. Reuses saveInvestigation()
+    // itself (same function the Considerations tab's own Save button calls)
+    // rather than duplicating its payload-building logic, so this always
+    // sends exactly what a real Save would.
+    try { await saveInvestigation(); } catch (e) { console.log('submitMinutesMeeting -> saveInvestigation() failed:', e); }
   }
 
   /* ── saveConsiderations — Considerations tab Save Draft button ───────────
