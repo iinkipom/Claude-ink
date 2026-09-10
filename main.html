@@ -11431,6 +11431,8 @@
         </div>
         <div id="reviseForm_${key}" class="hidden" style="margin-top:8px;">
           <textarea id="reviseTextInput_${key}" class="form-control" style="min-height:60px;">${escapeHtml(entry.text || '')}</textarea>
+          <label style="font-size:11px; display:block; margin-top:8px; margin-bottom:4px;">New Effective Date <span style="color:var(--charcoal-soft); font-weight:400;">(this is a new/changed action — set a fresh Effective Date for it)</span></label>
+          <input type="date" id="reviseEffInput_${key}" class="form-control" style="max-width:160px;" value="${escapeHtml(eff || '')}">
           <div style="display:flex; gap:8px; margin-top:8px;">
             <button type="button" id="reviseConfirmBtn_${key}" class="action-btn" style="background:var(--red); color:#fff;" onclick="confirmReviseAction('${type}',${num})">✔ Save Revision & Reset</button>
             <button type="button" class="action-btn" style="background:var(--surface-2); color:var(--charcoal); border:1px solid var(--border);" onclick="document.getElementById('reviseForm_${key}').classList.add('hidden'); document.getElementById('reviseToggle_${key}').classList.remove('hidden');">Cancel</button>
@@ -11679,19 +11681,35 @@
     const input = document.getElementById(`reviseTextInput_${key}`);
     const newText = input && input.value.trim();
     if (!newText) { alert('Please enter the revised action detail.'); return; }
+    const effInput = document.getElementById(`reviseEffInput_${key}`);
+    const newEff = effInput && effInput.value;
+    // Required, same as Change Effective Date & Re-Verify — per request,
+    // a revised action is effectively a NEW action, so it needs its own
+    // fresh Effective Date rather than inheriting the old (likely already
+    // past/irrelevant) one.
+    if (!newEff) { alert('Please pick a new Effective Date for the revised action.'); return; }
     const apTextBefore = resolveField(selectedClaimData, ['actionPlan', 'ActionPlan', 'action_plan'], '');
     const oldEntry = _extractActionTextByBlock(apTextBefore, type)[num];
     const oldText = (oldEntry && oldEntry.text) || '';
-    if (newText === oldText.trim()) { alert('The revised text is the same as before — nothing to save.'); return; }
-    if (!confirm(`Save this revision for ${type} Action #${num} and reset it for re-verification?\n\nThis records the before/after in the action's history, clears its NG result and current assignment — you'll need to click "Assign Verifier" again.`)) return;
+    const oldEff  = (oldEntry && oldEntry.eff) || '';
+    if (newText === oldText.trim() && newEff === oldEff) { alert('Nothing changed — the text and Effective Date are the same as before.'); return; }
+    if (!confirm(`Save this revision for ${type} Action #${num} (new Effective Date: ${newEff}) and reset it for re-verification?\n\nThis records the before/after in the action's history, clears its NG result and current assignment — you'll need to click "Assign Verifier" again.`)) return;
 
     const btn = document.getElementById(`reviseConfirmBtn_${key}`);
     if (btn) { btn.disabled = true; btn.innerText = 'Saving…'; }
 
     try {
-      const newApText = _rewriteActionText(apTextBefore, type, num, newText);
+      // Text and Effective Date both rewritten within actionPlan — same
+      // two single-block rewrite helpers the two "revise" paths already
+      // use individually, just chained here. Due date is untouched.
+      const newApText = _rewriteActionEffDate(_rewriteActionText(apTextBefore, type, num, newText), type, num, newEff);
       selectedClaimData.actionPlan = newApText;
-      selectedClaimData.actionReviseHistory = _appendActionReviseHistoryLine(selectedClaimData, type, num, oldText, newText);
+      // History records the Effective Date change alongside the text
+      // change (embedded in the before/after strings, not a separate
+      // field) so "what changed to what" always includes the date too.
+      const oldTextForHistory = oldText + (oldEff ? ` (Eff: ${oldEff})` : ' (Eff: —)');
+      const newTextForHistory = newText + ` (Eff: ${newEff})`;
+      selectedClaimData.actionReviseHistory = _appendActionReviseHistoryLine(selectedClaimData, type, num, oldTextForHistory, newTextForHistory);
 
       delete verifyState[key];
       selectedClaimData.verificationAssignees          = _removeKeyFromJsonField(resolveField(selectedClaimData, ['verificationAssignees', 'VerificationAssignees'], '{}'), key);
