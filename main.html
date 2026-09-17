@@ -1918,7 +1918,22 @@
   // ?['email'], with the claim number/subject/action list/link built into
   // the email body from item() fields. PASTE YOUR TRIGGER URL BELOW — a
   // placeholder no-ops the call (see the PASTE_ guard in
-  // confirmVerificationAssignments()).
+  // confirmVerificationAssignments()). `assignees` here is already
+  // FILTERED to only new/changed assignments (per request — a same-
+  // verifier action is skipped, see confirmVerificationAssignments()'s
+  // own comment), so this flow can email everyone it's handed without
+  // any dedup logic of its own.
+  //
+  // Confirm Assignment & Notify also separately writes
+  // `verificationNotifiedAssignees` (string, JSON) back through
+  // SAVE_VERIFICATION_URL right after a successful send — a snapshot of
+  // who's assigned to every action AT THE TIME of that notify, used to
+  // detect "changed since last notify" on the next click. Needs a
+  // matching "VerificationNotifiedAssignees" SharePoint column (Multiple
+  // lines of text, same shape as VerificationAssignees) mapped in
+  // SAVE_VERIFICATION_URL's Update item action, and added to claims.js's
+  // own Select action — skipping that read-back means every visit looks
+  // like nothing was ever notified, and everyone gets re-emailed again.
   const SEND_VERIFY_ASSIGNMENT_EMAIL_URL = "https://defaultf0acde03224240b9a3cad7a1bfe471.e5.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/12/workflows/b5cc4a858ed3401997176586bb1819ac/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=DYphpQsPbRinOY1SKZr2RLY2Xdu0h8QCfkgjHRKUU3E";
 
   // ── DUE / EFFECTIVE DATE FOLLOW-UP REMINDER (send Outlook email) ────────
@@ -10633,6 +10648,31 @@
     catch (_) { return {}; }
   }
 
+  /** Snapshot of who was assigned to EACH `${type}_${num}` action the last
+   *  time "Confirm Assignment & Notify" actually sent an email — JSON map
+   *  of key -> {empId, firstName, lastName}, parallel to
+   *  verificationAssignees. Used by confirmVerificationAssignments() so a
+   *  re-click after only SOME actions' verifiers were changed only emails
+   *  the people whose assignment is new/changed since the last notify,
+   *  not everyone currently assigned on the whole claim (per request —
+   *  "only Notify to new verifier only... same verifier no need to
+   *  notify them"). */
+  function _getVerificationNotifiedAssignees(claim) {
+    try { return JSON.parse(resolveField(claim || {}, ['verificationNotifiedAssignees', 'VerificationNotifiedAssignees', 'Verificationnotifiedassignees'], '{}')) || {}; }
+    catch (_) { return {}; }
+  }
+
+  /** Same "is this a different person than before" comparison
+   *  _saveVerificationAssignees() already uses (empId match, else
+   *  full-name match) — shared here so "changed since last notify" and
+   *  "changed since last assign" can never silently drift apart. */
+  function _isDifferentAssignee(prev, next) {
+    if (!prev && !next) return false;
+    if (!prev || !next) return true;
+    return String(prev.empId || '') !== String(next.empId || '')
+      || `${prev.firstName || ''} ${prev.lastName || ''}`.trim() !== `${next.firstName || ''} ${next.lastName || ''}`.trim();
+  }
+
   /** DD/MM/YY HH:MM:SS — same display convention self-evaluation and
    *  Finding Risk timestamps already use elsewhere in this app, reused
    *  here for verificationLog's accumulated entries. */
@@ -12404,24 +12444,42 @@
     }
   }
 
-  /** Team-Leader-only: emails every DISTINCT person currently assigned as a
-   *  verify person anywhere on this claim (across all Corrective/Preventive
-   *  actions, whether assigned just now or in an earlier visit), with a
-   *  deep link straight back to this claim's Verify workspace — see the
-   *  ?openVerify= handling in _handleDeepLinkOpenVerify(). Reads only the
-   *  CURRENT in-memory verifyState/assignments; doesn't touch verification
-   *  results, photos, documents, or status. Looks up each assignee's real
-   *  login email from USER_DATABASE by empId (falling back to a first+last
-   *  name match), since assignments only store name/empId, not email. */
+  /** Team-Leader-only: emails every DISTINCT person NEWLY or DIFFERENTLY
+   *  assigned as a verify person since the LAST time this button actually
+   *  sent a notification — per request: after revising a verifier on some
+   *  action, re-clicking this used to re-email EVERY currently-assigned
+   *  person on the whole claim, including ones whose assignment never
+   *  changed. Compares each action's current assignee (verifyState)
+   *  against the snapshot from the last successful notify
+   *  (verificationNotifiedAssignees) via _isDifferentAssignee() — a
+   *  same-assignee action is silently skipped, only new/changed ones go
+   *  out. Sends a deep link straight back to this claim's Verify
+   *  workspace — see the ?openVerify= handling in
+   *  _handleDeepLinkOpenVerify(). Doesn't touch verification results,
+   *  photos, documents, or status. Looks up each assignee's real login
+   *  email from USER_DATABASE by empId (falling back to a first+last name
+   *  match), since assignments only store name/empId, not email. */
   async function confirmVerificationAssignments() {
     if (!selectedClaimId || !selectedClaimData) return;
     const btn = document.getElementById('confirmAssignmentBtn');
     const originalText = btn.innerText;
 
-    const byPerson = new Map();
+    const currentAssignees = {};
     Object.keys(verifyState).forEach(key => {
       const a = verifyState[key] && verifyState[key].assignee;
-      if (!a) return;
+      if (a) currentAssignees[key] = a;
+    });
+
+    if (!Object.keys(currentAssignees).length) {
+      alert('No verify person has been assigned to any action yet — use "Assign Verifier" first.');
+      return;
+    }
+
+    const notifiedBefore = _getVerificationNotifiedAssignees(selectedClaimData);
+    const byPerson = new Map();
+    Object.keys(currentAssignees).forEach(key => {
+      const a = currentAssignees[key];
+      if (!_isDifferentAssignee(notifiedBefore[key], a)) return; // same verifier already notified for this action — skip
       const personKey = String(a.empId || '').trim() || `${a.firstName || ''}|${a.lastName || ''}`;
       if (!byPerson.has(personKey)) byPerson.set(personKey, { empId: a.empId || '', firstName: a.firstName || '', lastName: a.lastName || '', actions: [] });
       const [type, num] = key.split('_');
@@ -12429,7 +12487,7 @@
     });
 
     if (!byPerson.size) {
-      alert('No verify person has been assigned to any action yet — use "Assign Verifier" first.');
+      alert('No new or changed verify-person assignments to notify — everyone currently assigned already got their email for this action.');
       return;
     }
 
@@ -12462,10 +12520,27 @@
       assignees: sendable,
     };
 
+    // Snapshot to persist AFTER a real send — every CURRENTLY assigned
+    // action (not just the ones just notified), so an action whose
+    // verifier didn't change this round is correctly remembered as
+    // "already notified with this assignee" for the NEXT click too.
+    const notifiedAfterJson = JSON.stringify(currentAssignees);
+    async function _persistNotifiedSnapshot() {
+      selectedClaimData.verificationNotifiedAssignees = notifiedAfterJson;
+      if (!SAVE_VERIFICATION_URL || SAVE_VERIFICATION_URL.startsWith('PASTE_')) return;
+      try {
+        await fetch(SAVE_VERIFICATION_URL, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: selectedClaimId.toString(), verificationNotifiedAssignees: notifiedAfterJson, tabSave: 'notifyAssignment' })
+        });
+      } catch (e) { console.log('_persistNotifiedSnapshot (CORS suppressed):', e); }
+    }
+
     btn.innerText = '📧 Sending...'; btn.disabled = true;
     try {
       if (SEND_VERIFY_ASSIGNMENT_EMAIL_URL && !SEND_VERIFY_ASSIGNMENT_EMAIL_URL.startsWith('PASTE_')) {
         await fetch(SEND_VERIFY_ASSIGNMENT_EMAIL_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        await _persistNotifiedSnapshot();
         alert(`✅ Notification sent to ${sendable.length} verify person(s).`);
       } else {
         console.log('[confirmVerificationAssignments] SEND_VERIFY_ASSIGNMENT_EMAIL_URL is still a placeholder — nothing was sent:', payload);
@@ -12473,6 +12548,7 @@
       }
     } catch (e) {
       console.log('confirmVerificationAssignments (CORS suppressed):', e);
+      await _persistNotifiedSnapshot();
       alert('✔ Sent (check flow)');
     } finally {
       btn.innerText = originalText; btn.disabled = false;
