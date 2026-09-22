@@ -1102,9 +1102,22 @@ textarea.form-control {
 .why-input-wrap input { width: 100%; height: 100%; border: 2px solid var(--border-light); border-radius: var(--r-sm); padding: 0 16px; font-size: var(--fs-md); transition: 0.2s; }
 .why-input-wrap input:focus { border-color: var(--charcoal); outline: none; }
 
-/* Hover Action Buttons for Root Cause & Outflow */
-.why-actions { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); display: flex; gap: 6px; opacity: 0; transition: opacity 0.2s; }
-.why-row:hover .why-actions { opacity: 1; }
+/* Question + Answer split — each Why row is now its own small card with a
+   dedicated "what's being asked" field and a dedicated "the finding"
+   field, instead of one ambiguous line (added per request: "must be
+   have section to Asking with 5 Why and must have section to answer"). */
+.why-qa-wrap { flex: 1; border: 2px solid var(--border-light); border-radius: var(--r-sm); padding: 12px 14px; background: var(--white); transition: 0.2s; }
+.why-qa-wrap:focus-within { border-color: var(--charcoal); }
+.why-qa-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.why-qa-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--charcoal-soft); }
+.why-field { margin-bottom: 8px; }
+.why-field:last-child { margin-bottom: 0; }
+.why-field label { display: block; font-size: 10.5px; font-weight: 700; color: var(--charcoal-soft); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 3px; }
+.why-field input, .why-field textarea { width: 100%; border: 1px solid var(--border-light); border-radius: 6px; padding: 8px 10px; font-size: var(--fs-md); font-family: inherit; box-sizing: border-box; }
+.why-field textarea { min-height: 52px; resize: vertical; }
+.why-field input:focus, .why-field textarea:focus { border-color: var(--charcoal); outline: none; }
+
+/* Root Cause & Outflow action buttons */
 .action-btn { padding: 6px 10px; font-size: 11px; font-weight: 700; border-radius: var(--r-sm); border: none; cursor: pointer; transition: 0.2s; }
 .btn-root { background: var(--surface-2); color: var(--charcoal); border: 1px solid var(--border); }
 .btn-outflow { background: var(--surface-2); color: var(--charcoal); border: 1px solid var(--border); }

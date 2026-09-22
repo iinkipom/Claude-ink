@@ -4510,13 +4510,13 @@
     try {
       let rData = [];
       for (let i = 1; i <= rootWhyCount; i++) {
-        const v = document.getElementById(`rootWhyInput_${i}`)?.value;
-        if (v) rData.push(`Why ${i}: ${v}${rootRealIndex === i ? ' [REAL]' : ''}`);
+        const line = _buildWhyLine('root', i, rootRealIndex === i);
+        if (line) rData.push(line);
       }
       let oData = [];
       for (let i = 1; i <= outflowWhyCount; i++) {
-        const v = document.getElementById(`outflowWhyInput_${i}`)?.value;
-        if (v) oData.push(`Why ${i}: ${v}${outflowRealIndex === i ? ' [REAL]' : ''}`);
+        const line = _buildWhyLine('outflow', i, outflowRealIndex === i);
+        if (line) oData.push(line);
       }
 
       const rcText = rData.join('\n');
@@ -5016,12 +5016,12 @@
     // Root cause & outflow data
     let rData = [], oData = [];
     for (let i = 1; i <= (typeof rootWhyCount !== 'undefined' ? rootWhyCount : 0); i++) {
-      const v = document.getElementById(`rootWhyInput_${i}`)?.value;
-      if (v) rData.push(`Why ${i}: ${v}${rootRealIndex === i ? ' [REAL CAUSE]' : ''}`);
+      const line = _buildWhyDisplayLine('root', i, rootRealIndex === i, '[REAL CAUSE]');
+      if (line) rData.push(line);
     }
     for (let i = 1; i <= (typeof outflowWhyCount !== 'undefined' ? outflowWhyCount : 0); i++) {
-      const v = document.getElementById(`outflowWhyInput_${i}`)?.value;
-      if (v) oData.push(`Why ${i}: ${v}${outflowRealIndex === i ? ' [REAL OUTFLOW]' : ''}`);
+      const line = _buildWhyDisplayLine('outflow', i, outflowRealIndex === i, '[REAL OUTFLOW]');
+      if (line) oData.push(line);
     }
     // Corrective / Preventive actions
     const collectActions = function(wrapId) {
@@ -6219,6 +6219,70 @@
     return matches ? matches.length : 0;
   }
 
+  /** Builds ONE saved "Why N: ..." line from a Why row's live Question +
+   *  Answer fields — shared by every place that saves/sends
+   *  rootCauseAnalysis/outflowAnalysis, so the on-disk format (and the
+   *  [REAL] marker) can never drift between them. Storage format:
+   *    Why N: Q: <question> || A: <answer>[ [REAL]]
+   *  Question is optional (5-Whys can still be done answer-only, same as
+   *  before this feature) — Answer is what's required to save a row at
+   *  all, matching the old single-field behavior. Returns null if this
+   *  row has no Answer typed in (nothing to save). */
+  function _buildWhyLine(type, i, isReal) {
+    const q = (document.getElementById(`${type}WhyQuestion_${i}`)?.value || '').trim();
+    const a = (document.getElementById(`${type}WhyInput_${i}`)?.value || '').trim();
+    if (!a) return null;
+    const qa = q ? `Q: ${q} || A: ${a}` : `A: ${a}`;
+    return `Why ${i}: ${qa}${isReal ? ' [REAL]' : ''}`;
+  }
+
+  /** Same idea as _buildWhyLine() but for READ-ONLY display contexts that
+   *  build their text straight from the live DOM rather than saving it
+   *  (the Minutes Meeting email, the Evaluate tab preview, the PDF
+   *  report) — each caller passes its own realTag wording (e.g. "[REAL
+   *  ROOT]", "[REAL OUTFLOW]") since those already differ by caller and
+   *  aren't parsed back from anywhere. */
+  function _buildWhyDisplayLine(type, i, isReal, realTag) {
+    const q = (document.getElementById(`${type}WhyQuestion_${i}`)?.value || '').trim();
+    const a = (document.getElementById(`${type}WhyInput_${i}`)?.value || '').trim();
+    if (!a) return null;
+    const body = q ? `Q: ${q} / A: ${a}` : a;
+    return `Why ${i}: ${body}${isReal ? ` ${realTag}` : ''}`;
+  }
+
+  /** Parses ONE saved "Why N: ..." line back into {num, question, answer,
+   *  real} — handles both the current Q/A format AND a claim saved
+   *  before this feature existed (plain "Why N: <text>", no "Q:"/"A:"
+   *  markers at all), which restores with question left blank and the
+   *  whole old text as the answer, exactly matching what the single
+   *  field used to mean. */
+  function _parseWhyLine(line) {
+    const m = String(line).match(/^\s*Why\s*(\d+):\s*(?:Q:\s*(.*?)\s*\|\|\s*)?A:\s*(.*?)\s*(\[REAL\])?\s*$/i);
+    if (m) return { num: parseInt(m[1], 10), question: (m[2] || '').trim(), answer: (m[3] || '').trim(), real: !!m[4] };
+    // Legacy fallback — no "A:" marker present at all.
+    const legacy = String(line).match(/^\s*Why\s*(\d+):\s*(.*?)\s*(\[REAL\])?\s*$/i);
+    if (legacy) return { num: parseInt(legacy[1], 10), question: '', answer: (legacy[2] || '').trim(), real: !!legacy[3] };
+    return null;
+  }
+
+  /** Human-readable rendering of a saved Why blob for read-only contexts
+   *  (the PDF report, the Minutes Meeting email) — shows the Question
+   *  (if any) and Answer as clearly separate lines instead of the raw
+   *  "Q: ... || A: ..." storage format. realTag lets each caller keep its
+   *  own existing wording (report says "[REAL ROOT]", email says
+   *  "[REAL CAUSE]", etc.) without this helper hard-coding one. */
+  function _formatWhyForDisplay(text, realTag) {
+    if (!text || text === 'N/A') return '';
+    return String(text).split('\n').map(line => {
+      const p = _parseWhyLine(line);
+      if (!p) return line;
+      const tag = p.real && realTag ? ` ${realTag}` : '';
+      return p.question
+        ? `Why ${p.num}: Q: ${p.question} / A: ${p.answer}${tag}`
+        : `Why ${p.num}: ${p.answer}${tag}`;
+    }).join('\n');
+  }
+
   /** Maps a (Root Cause quantity, Outflow quantity) pair — each clamped to
    *  1..5, where 5 means ">=5" — to its 0..24 position in Table 2's ordered
    *  25-combo block, exactly reproducing the workbook's hand-built order:
@@ -6604,14 +6668,14 @@
 
     // 4. Trouble Analysis Detail — pull from the live 5-Why DOM (Tab 4)
     const evalAnalysisWrap = document.getElementById('evalAnalysisWrap');
-    let rText = []; for (let i = 1; i <= rootWhyCount; i++) { const v = document.getElementById(`rootWhyInput_${i}`)?.value; if (v) rText.push(`Why ${i}: ${v}${rootRealIndex===i?' [REAL ROOT]':''}`); }
-    let oText = []; for (let i = 1; i <= outflowWhyCount; i++) { const v = document.getElementById(`outflowWhyInput_${i}`)?.value; if (v) oText.push(`Why ${i}: ${v}${outflowRealIndex===i?' [REAL OUTFLOW]':''}`); }
+    let rText = []; for (let i = 1; i <= rootWhyCount; i++) { const line = _buildWhyDisplayLine('root', i, rootRealIndex===i, '[REAL ROOT]'); if (line) rText.push(line); }
+    let oText = []; for (let i = 1; i <= outflowWhyCount; i++) { const line = _buildWhyDisplayLine('outflow', i, outflowRealIndex===i, '[REAL OUTFLOW]'); if (line) oText.push(line); }
     if (rText.length || oText.length) {
       evalAnalysisWrap.innerHTML =
         `<strong style="font-size:11px;">Root Cause Analysis</strong><div style="margin:2px 0 8px 0;">${rText.join('<br>') || '-'}</div>` +
         `<strong style="font-size:11px;">Out Flow Analysis</strong><div style="margin:2px 0 0 0;">${oText.join('<br>') || '-'}</div>`;
     } else {
-      evalAnalysisWrap.innerText = resolveField(c, ['rootCauseAnalysis','RootCauseAnalysis','troubleAnalysis','TroubleAnalysis'], 'N/A');
+      evalAnalysisWrap.innerText = _formatWhyForDisplay(resolveField(c, ['rootCauseAnalysis','RootCauseAnalysis','troubleAnalysis','TroubleAnalysis'], ''), '[REAL]') || 'N/A';
     }
 
     // 5. Considerations Detail — pull from the live Corrective/Preventive DOM (Tab 5)
@@ -9309,6 +9373,14 @@
   let rootWhyCount = 0; let outflowWhyCount = 0;
   let rootRealIndex = null; let outflowRealIndex = null;
 
+  /** 5-Why row — split into a dedicated QUESTION field (what's being
+   *  asked at this level) and ANSWER field (the actual finding), per
+   *  request ("must be have section to Asking with 5 Why and must have
+   *  section to answer that why") — previously this was a single line
+   *  that conflated the two. Row 2+ auto-suggests its Question from the
+   *  PREVIOUS row's Answer ("Why did <previous answer> happen?"), matching
+   *  real 5-Whys practice where each question chains off the last
+   *  answer — still fully editable, just a starting point. */
   function addSpecificWhyRow(containerId, type) {
     if (type==='root') rootWhyCount++; else outflowWhyCount++;
     const currentCount = type==='root' ? rootWhyCount : outflowWhyCount;
@@ -9316,12 +9388,25 @@
     const row = document.createElement('div'); row.className = 'why-row';
     const markLabel = type==='root' ? '[R]' : '[O]';
     const fnCall = `markRealWhy(${currentCount},'${type}')`;
+    let suggestedQuestion = '';
+    if (currentCount > 1) {
+      const prevAnswer = document.getElementById(`${type}WhyInput_${currentCount - 1}`)?.value?.trim();
+      if (prevAnswer) suggestedQuestion = `Why did "${prevAnswer}" happen?`;
+    }
     row.innerHTML = `
       <div class="why-number">${currentCount}</div>
-      <div class="why-input-wrap">
-        <input type="text" id="${type}WhyInput_${currentCount}" placeholder="Why did this happen?">
-        <div class="why-actions">
+      <div class="why-qa-wrap">
+        <div class="why-qa-header">
+          <span class="why-qa-title">Why #${currentCount}</span>
           <button type="button" class="action-btn ${type==='root'?'btn-root':'btn-outflow'}" id="btn${type}_${currentCount}" onclick="${fnCall}" title="Mark as Real">Mark ${markLabel}</button>
+        </div>
+        <div class="why-field">
+          <label>Question</label>
+          <input type="text" id="${type}WhyQuestion_${currentCount}" placeholder="Why did this happen?" value="${escapeHtml(suggestedQuestion)}">
+        </div>
+        <div class="why-field">
+          <label>Answer</label>
+          <textarea id="${type}WhyInput_${currentCount}" placeholder="Because…"></textarea>
         </div>
       </div>`;
     container.appendChild(row);
@@ -9464,9 +9549,9 @@
 
       // Whys
       let rData = [];
-      for (let i=1; i<=rootWhyCount; i++) { const v=document.getElementById(`rootWhyInput_${i}`)?.value; if(v) rData.push(`Why ${i}: ${v}${rootRealIndex===i?' [REAL]':''}`); }
+      for (let i=1; i<=rootWhyCount; i++) { const line=_buildWhyLine('root', i, rootRealIndex===i); if(line) rData.push(line); }
       let oData = [];
-      for (let i=1; i<=outflowWhyCount; i++) { const v=document.getElementById(`outflowWhyInput_${i}`)?.value; if(v) oData.push(`Why ${i}: ${v}${outflowRealIndex===i?' [REAL]':''}`); }
+      for (let i=1; i<=outflowWhyCount; i++) { const line=_buildWhyLine('outflow', i, outflowRealIndex===i); if(line) oData.push(line); }
 
       // Actions — read files from live input OR fall back to existing photos, tag filenames with block type+number
       // NOTE: image collection is intentionally OUTSIDE the `if (t)` text
@@ -9891,7 +9976,7 @@
       const parts = rcText.split(/Solution:\s*/i);
 
       const m = parts[0].match(/Why\s*(\d+):\s*(.*?)(?:\s*\[REAL\])?$/gim);
-      if(m) m.forEach(line=>{ addSpecificWhyRow('rootWhyContainer','root'); const i=rootWhyCount; document.getElementById(`rootWhyInput_${i}`).value=line.replace(/Why \d+: /i,'').replace(' [REAL]','').trim(); if(line.includes('[REAL]')) markRealWhy(i,'root'); });
+      if(m) m.forEach(line=>{ const parsed=_parseWhyLine(line); addSpecificWhyRow('rootWhyContainer','root'); const i=rootWhyCount; if(parsed){ document.getElementById(`rootWhyQuestion_${i}`).value=parsed.question; document.getElementById(`rootWhyInput_${i}`).value=parsed.answer; if(parsed.real) markRealWhy(i,'root'); } });
     }
     if (rootWhyCount===0) addSpecificWhyRow('rootWhyContainer','root');
 
@@ -9900,7 +9985,7 @@
     const ofText = resolveField(claim, ['outflowAnalysis','OutflowAnalysis','outFlow'], '');
     if (ofText && ofText !== "N/A") {
       const m = ofText.match(/Why\s*(\d+):\s*(.*?)(?:\s*\[REAL\])?$/gim);
-      if(m) m.forEach(line=>{ addSpecificWhyRow('outflowWhyContainer','outflow'); const i=outflowWhyCount; document.getElementById(`outflowWhyInput_${i}`).value=line.replace(/Why \d+: /i,'').replace(' [REAL]','').trim(); if(line.includes('[REAL]')) markRealWhy(i,'outflow'); });
+      if(m) m.forEach(line=>{ const parsed=_parseWhyLine(line); addSpecificWhyRow('outflowWhyContainer','outflow'); const i=outflowWhyCount; if(parsed){ document.getElementById(`outflowWhyQuestion_${i}`).value=parsed.question; document.getElementById(`outflowWhyInput_${i}`).value=parsed.answer; if(parsed.real) markRealWhy(i,'outflow'); } });
     }
     if (outflowWhyCount===0) addSpecificWhyRow('outflowWhyContainer','outflow');
 
@@ -10093,7 +10178,7 @@
     if (rcText && rcText !== 'N/A') {
       const parts = rcText.split(/Solution:\s*/i);
       const m = parts[0].match(/Why\s*(\d+):\s*(.*?)(?:\s*\[REAL\])?$/gim);
-      if (m) m.forEach(line => { addSpecificWhyRow('rootWhyContainer','root'); const i = rootWhyCount; document.getElementById(`rootWhyInput_${i}`).value = line.replace(/Why \d+: /i,'').replace(' [REAL]','').trim(); if (line.includes('[REAL]')) markRealWhy(i,'root'); });
+      if (m) m.forEach(line => { const parsed=_parseWhyLine(line); addSpecificWhyRow('rootWhyContainer','root'); const i = rootWhyCount; if(parsed){ document.getElementById(`rootWhyQuestion_${i}`).value=parsed.question; document.getElementById(`rootWhyInput_${i}`).value=parsed.answer; if(parsed.real) markRealWhy(i,'root'); } });
     }
     if (rootWhyCount === 0) addSpecificWhyRow('rootWhyContainer','root');
 
@@ -10101,7 +10186,7 @@
     const ofText = resolveField(sourceClaim, ['outflowAnalysis','OutflowAnalysis','outFlow'], '');
     if (ofText && ofText !== 'N/A') {
       const m = ofText.match(/Why\s*(\d+):\s*(.*?)(?:\s*\[REAL\])?$/gim);
-      if (m) m.forEach(line => { addSpecificWhyRow('outflowWhyContainer','outflow'); const i = outflowWhyCount; document.getElementById(`outflowWhyInput_${i}`).value = line.replace(/Why \d+: /i,'').replace(' [REAL]','').trim(); if (line.includes('[REAL]')) markRealWhy(i,'outflow'); });
+      if (m) m.forEach(line => { const parsed=_parseWhyLine(line); addSpecificWhyRow('outflowWhyContainer','outflow'); const i = outflowWhyCount; if(parsed){ document.getElementById(`outflowWhyQuestion_${i}`).value=parsed.question; document.getElementById(`outflowWhyInput_${i}`).value=parsed.answer; if(parsed.real) markRealWhy(i,'outflow'); } });
     }
     if (outflowWhyCount === 0) addSpecificWhyRow('outflowWhyContainer','outflow');
 
@@ -11917,8 +12002,8 @@
     const runNo = cd.index_running_no || cd.IndexRunningNo || cd.index || cd.Index || 1;
     const claimNo = buildClaimNo(runNo, resolveField(cd, ['issueDate', 'IssueDate'], ''));
     const subject = resolveField(cd, ['Subject', 'subject', 'title', 'Title'], 'N/A');
-    const rootCause = resolveField(cd, ['rootCauseAnalysis', 'RootCauseAnalysis', 'troubleAnalysis', 'TroubleAnalysis'], 'N/A');
-    const outflow = resolveField(cd, ['outflowAnalysis', 'OutflowAnalysis', 'outFlow'], 'N/A');
+    const rootCause = _formatWhyForDisplay(resolveField(cd, ['rootCauseAnalysis', 'RootCauseAnalysis', 'troubleAnalysis', 'TroubleAnalysis'], ''), '[REAL]') || 'N/A';
+    const outflow = _formatWhyForDisplay(resolveField(cd, ['outflowAnalysis', 'OutflowAnalysis', 'outFlow'], ''), '[REAL]') || 'N/A';
     let shopVal = '—';
     const _shopRaw = cd.shopConcerned || cd.ShopConcerned || cd.ClaimShop || cd.claimShop || '';
     try {
@@ -12147,7 +12232,7 @@
     } catch (_) { if (_shopRaw && _shopRaw.trim()) shopVal = _shopRaw.trim(); }
     document.getElementById('verifyShop').textContent = shopVal;
 
-    document.getElementById('verifyRootCause').textContent = resolveField(claim, ['rootCauseAnalysis', 'RootCauseAnalysis', 'troubleAnalysis', 'TroubleAnalysis'], 'N/A');
+    document.getElementById('verifyRootCause').textContent = _formatWhyForDisplay(resolveField(claim, ['rootCauseAnalysis', 'RootCauseAnalysis', 'troubleAnalysis', 'TroubleAnalysis'], ''), '[REAL]') || 'N/A';
     const closeDateRaw = claim.CloseDate || claim.closeDate;
     document.getElementById('verifyClosedDate').textContent = closeDateRaw ? formatDateDisplay(closeDateRaw) : '—';
 
@@ -12741,8 +12826,8 @@
       // ── Trouble Analysis Section ──
       const analysisSection = document.createElement('div');
       analysisSection.style.cssText = 'page-break-before:always; break-before:page;';
-      let rText=[]; for(let i=1;i<=rootWhyCount;i++){const v=document.getElementById(`rootWhyInput_${i}`)?.value;if(v)rText.push(`Why ${i}: ${v}${rootRealIndex===i?' [REAL ROOT]':''}`);}
-      let oText=[]; for(let i=1;i<=outflowWhyCount;i++){const v=document.getElementById(`outflowWhyInput_${i}`)?.value;if(v)oText.push(`Why ${i}: ${v}${outflowRealIndex===i?' [REAL OUTFLOW]':''}`);}
+      let rText=[]; for(let i=1;i<=rootWhyCount;i++){const line=_buildWhyDisplayLine('root', i, rootRealIndex===i, '[REAL ROOT]'); if(line) rText.push(line);}
+      let oText=[]; for(let i=1;i<=outflowWhyCount;i++){const line=_buildWhyDisplayLine('outflow', i, outflowRealIndex===i, '[REAL OUTFLOW]'); if(line) oText.push(line);}
       analysisSection.innerHTML = `
         <div style="font-size:13px; font-weight:800; border-bottom:1px solid #171717; padding-bottom:3px; color:#DA0037; text-transform:uppercase; margin:12px 0 8px 0;">Trouble Analysis →</div>
         <div style="margin-left:10px; font-size:11px;">
