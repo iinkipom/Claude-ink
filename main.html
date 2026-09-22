@@ -9386,6 +9386,7 @@
     const currentCount = type==='root' ? rootWhyCount : outflowWhyCount;
     const container = document.getElementById(containerId);
     const row = document.createElement('div'); row.className = 'why-row';
+    row.id = `whyRow_${type}_${currentCount}`;
     const markLabel = type==='root' ? '[R]' : '[O]';
     const fnCall = `markRealWhy(${currentCount},'${type}')`;
     let suggestedQuestion = '';
@@ -9398,7 +9399,10 @@
       <div class="why-qa-wrap">
         <div class="why-qa-header">
           <span class="why-qa-title">Why #${currentCount}</span>
-          <button type="button" class="action-btn ${type==='root'?'btn-root':'btn-outflow'}" id="btn${type}_${currentCount}" onclick="${fnCall}" title="Mark as Real">Mark ${markLabel}</button>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="action-btn ${type==='root'?'btn-root':'btn-outflow'}" id="btn${type}_${currentCount}" onclick="${fnCall}" title="Mark as Real">Mark ${markLabel}</button>
+            <button type="button" class="why-remove-btn" data-why-remove onclick="removeWhyRow(${currentCount},'${type}')" title="Remove this Why">✕</button>
+          </div>
         </div>
         <div class="why-field">
           <label>Question</label>
@@ -9410,6 +9414,60 @@
         </div>
       </div>`;
     container.appendChild(row);
+  }
+
+  /** Removes one 5-Why row AND renumbers every row above it down by one —
+   *  both the visible "Why #N" label and every element id that encodes N
+   *  (Question/Answer inputs, the Mark Real/Remove buttons and their
+   *  onclick handlers) — same "processed in ascending order, freed number
+   *  genuinely reused by the next Add" approach as removeInspectionBlock().
+   *  Also keeps rootRealIndex/outflowRealIndex pointing at the SAME row's
+   *  content: cleared if the removed row WAS the marked-real one, shifted
+   *  down by one if the marked row sat above the one removed. */
+  function removeWhyRow(n, type) {
+    const count = type === 'root' ? rootWhyCount : outflowWhyCount;
+    const row = document.getElementById(`whyRow_${type}_${n}`);
+    if (row) row.remove();
+
+    let realIndex = type === 'root' ? rootRealIndex : outflowRealIndex;
+    if (realIndex === n) realIndex = null;
+    else if (realIndex !== null && realIndex > n) realIndex--;
+
+    for (let i = n + 1; i <= count; i++) {
+      const from = i, to = i - 1;
+      const fromRow = document.getElementById(`whyRow_${type}_${from}`);
+      if (!fromRow) continue;
+      fromRow.id = `whyRow_${type}_${to}`;
+
+      const numberEl = fromRow.querySelector('.why-number');
+      if (numberEl) numberEl.textContent = to;
+      const titleEl = fromRow.querySelector('.why-qa-title');
+      if (titleEl) titleEl.textContent = `Why #${to}`;
+
+      const markBtn = fromRow.querySelector(`#btn${type}_${from}`);
+      if (markBtn) { markBtn.id = `btn${type}_${to}`; markBtn.setAttribute('onclick', `markRealWhy(${to},'${type}')`); }
+
+      const removeBtn = fromRow.querySelector('[data-why-remove]');
+      if (removeBtn) removeBtn.setAttribute('onclick', `removeWhyRow(${to},'${type}')`);
+
+      const qInput = fromRow.querySelector(`#${type}WhyQuestion_${from}`);
+      if (qInput) qInput.id = `${type}WhyQuestion_${to}`;
+
+      const aInput = fromRow.querySelector(`#${type}WhyInput_${from}`);
+      if (aInput) aInput.id = `${type}WhyInput_${to}`;
+    }
+
+    if (type === 'root') { rootWhyCount--; rootRealIndex = realIndex; }
+    else { outflowWhyCount--; outflowRealIndex = realIndex; }
+
+    // Re-apply the "selected" highlight after renumbering — the button id
+    // that now matches realIndex may not be the DOM node that had the
+    // class before the shift above.
+    document.querySelectorAll(type==='root'?'.btn-root':'.btn-outflow').forEach(b => b.classList.remove('selected'));
+    if (realIndex !== null) {
+      const btn = document.getElementById(`btn${type}_${realIndex}`);
+      if (btn) btn.classList.add('selected');
+    }
   }
 
   function markRealWhy(index, type) {

@@ -1123,6 +1123,8 @@ textarea.form-control {
 .btn-outflow { background: var(--surface-2); color: var(--charcoal); border: 1px solid var(--border); }
 .btn-root.selected { background: #fee2e2; color: #dc2626; border-color: #f87171; }
 .btn-outflow.selected { background: #e0e7ff; color: #4f46e5; border-color: #818cf8; }
+.why-remove-btn { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface-2); color: var(--charcoal-soft); font-size: 13px; line-height: 1; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; padding: 0; }
+.why-remove-btn:hover { background: #fee2e2; color: #dc2626; border-color: #f87171; }
 
 /* Verify Claim — OK / NG action buttons */
 .btn-verify-ok, .btn-verify-ng { background: var(--surface-2); color: var(--charcoal); border: 1px solid var(--border); padding: 8px 16px; font-size: 12px; }
