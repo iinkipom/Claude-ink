@@ -753,19 +753,11 @@
           <div id="tabAnalysis" class="tab-content">
             <div style="margin-bottom:15px; border-bottom: 2px solid var(--border); padding-bottom: 15px;">
               <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:10px;">
-                <label style="font-weight:700; text-transform:uppercase; font-size:12px; color:var(--red);">A. Root Cause Analysis (5-Why)</label>
-                <span style="font-size:11px; color:var(--charcoal-soft);">*Hover to mark [R] Real Root Cause</span>
+                <label style="font-weight:700; text-transform:uppercase; font-size:12px; color:var(--red);">A. Trouble Analysis (5-Why)</label>
+                <span style="font-size:11px; color:var(--charcoal-soft);">For each Why, tag it as Root Cause or Outflow</span>
               </div>
-              <div class="why-container" id="rootWhyContainer"></div>
-              <button class="btn" style="background:var(--surface-2); color:var(--charcoal); margin-top: 10px;" onclick="addSpecificWhyRow('rootWhyContainer', 'root')">+ Add Root Cause Why</button>
-            </div>
-            <div style="margin-bottom:15px; border-bottom: 2px solid var(--border); padding-bottom: 15px;">
-              <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:10px;">
-                <label style="font-weight:700; text-transform:uppercase; font-size:12px; color:var(--red);">B. Outflow Analysis (5-Why)</label>
-                <span style="font-size:11px; color:var(--charcoal-soft);">*Hover to mark [O] Real Outflow</span>
-              </div>
-              <div class="why-container" id="outflowWhyContainer"></div>
-              <button class="btn" style="background:var(--surface-2); color:var(--charcoal); margin-top: 10px;" onclick="addSpecificWhyRow('outflowWhyContainer', 'outflow')">+ Add Outflow Why</button>
+              <div class="why-container" id="whyContainer"></div>
+              <button class="btn" style="background:var(--surface-2); color:var(--charcoal); margin-top: 10px;" onclick="addWhyRow()">+ Add Why</button>
             </div>
 
 
@@ -4508,16 +4500,7 @@
     btn.innerText = '💾 Saving…'; btn.disabled = true;
 
     try {
-      let rData = [];
-      for (let i = 1; i <= rootWhyCount; i++) {
-        const line = _buildWhyLine('root', i, rootRealIndex === i);
-        if (line) rData.push(line);
-      }
-      let oData = [];
-      for (let i = 1; i <= outflowWhyCount; i++) {
-        const line = _buildWhyLine('outflow', i, outflowRealIndex === i);
-        if (line) oData.push(line);
-      }
+      const { rootLines: rData, outflowLines: oData } = _collectWhyLines(_buildWhyLine);
 
       const rcText = rData.join('\n');
       const ofText = oData.join('\n');
@@ -5014,15 +4997,7 @@
   async function submitMinutesMeeting(btn) {
     const cd = selectedClaimData || {};
     // Root cause & outflow data
-    let rData = [], oData = [];
-    for (let i = 1; i <= (typeof rootWhyCount !== 'undefined' ? rootWhyCount : 0); i++) {
-      const line = _buildWhyDisplayLine('root', i, rootRealIndex === i, '[REAL CAUSE]');
-      if (line) rData.push(line);
-    }
-    for (let i = 1; i <= (typeof outflowWhyCount !== 'undefined' ? outflowWhyCount : 0); i++) {
-      const line = _buildWhyDisplayLine('outflow', i, outflowRealIndex === i, '[REAL OUTFLOW]');
-      if (line) oData.push(line);
-    }
+    const { rootLines: rData, outflowLines: oData } = _collectWhyLines(_buildWhyDisplayLine);
     // Corrective / Preventive actions
     const collectActions = function(wrapId) {
       return Array.from(document.querySelectorAll('#' + wrapId + ' .action-block')).map(function(b, idx) {
@@ -6221,33 +6196,95 @@
 
   /** Builds ONE saved "Why N: ..." line from a Why row's live Question +
    *  Answer fields — shared by every place that saves/sends
-   *  rootCauseAnalysis/outflowAnalysis, so the on-disk format (and the
-   *  [REAL] marker) can never drift between them. Storage format:
-   *    Why N: Q: <question> || A: <answer>[ [REAL]]
-   *  Question is optional (5-Whys can still be done answer-only, same as
-   *  before this feature) — Answer is what's required to save a row at
-   *  all, matching the old single-field behavior. Returns null if this
-   *  row has no Answer typed in (nothing to save). */
-  function _buildWhyLine(type, i, isReal) {
-    const q = (document.getElementById(`${type}WhyQuestion_${i}`)?.value || '').trim();
-    const a = (document.getElementById(`${type}WhyInput_${i}`)?.value || '').trim();
+   *  rootCauseAnalysis/outflowAnalysis, so the on-disk format can never
+   *  drift between them. Storage format:
+   *    Why N: Q: <question> || A: <answer>
+   *  `domIndex` is the row's position in the unified 5-Why list (used to
+   *  find its DOM elements); `outputNum` is the "Why N" number to WRITE,
+   *  which is a separate, per-category running count (see
+   *  _collectWhyLines()) since Root Cause and Outflow are still saved as
+   *  two independently-numbered fields even though they're now edited in
+   *  one combined list. Question is optional (5-Whys can still be done
+   *  answer-only, same as before this feature) — Answer is what's
+   *  required to save a row at all. Returns null if this row has no
+   *  Answer typed in (nothing to save). */
+  function _buildWhyLine(domIndex, outputNum) {
+    const q = (document.getElementById(`whyQuestion_${domIndex}`)?.value || '').trim();
+    const a = (document.getElementById(`whyInput_${domIndex}`)?.value || '').trim();
     if (!a) return null;
     const qa = q ? `Q: ${q} || A: ${a}` : `A: ${a}`;
-    return `Why ${i}: ${qa}${isReal ? ' [REAL]' : ''}`;
+    return `Why ${outputNum}: ${qa}`;
   }
 
   /** Same idea as _buildWhyLine() but for READ-ONLY display contexts that
    *  build their text straight from the live DOM rather than saving it
    *  (the Minutes Meeting email, the Evaluate tab preview, the PDF
-   *  report) — each caller passes its own realTag wording (e.g. "[REAL
-   *  ROOT]", "[REAL OUTFLOW]") since those already differ by caller and
-   *  aren't parsed back from anywhere. */
-  function _buildWhyDisplayLine(type, i, isReal, realTag) {
-    const q = (document.getElementById(`${type}WhyQuestion_${i}`)?.value || '').trim();
-    const a = (document.getElementById(`${type}WhyInput_${i}`)?.value || '').trim();
+   *  report) — human-readable "Q: ... / A: ..." instead of the "||"
+   *  storage separator. */
+  function _buildWhyDisplayLine(domIndex, outputNum) {
+    const q = (document.getElementById(`whyQuestion_${domIndex}`)?.value || '').trim();
+    const a = (document.getElementById(`whyInput_${domIndex}`)?.value || '').trim();
     if (!a) return null;
     const body = q ? `Q: ${q} / A: ${a}` : a;
-    return `Why ${i}: ${body}${isReal ? ` ${realTag}` : ''}`;
+    return `Why ${outputNum}: ${body}`;
+  }
+
+  /** Splits the unified 5-Why list into its two saved fields — walks
+   *  every row in whyCount order, routes each to Root Cause or Outflow
+   *  by whyCategories[i] (defaulting to 'root' for a row somehow left
+   *  untagged), and numbers each category's own lines 1..N independently
+   *  — so rootCauseAnalysis/outflowAnalysis keep exactly the same "Why
+   *  N: ..." per-field numbering _countWhyEntries()/computeTroubleAnalysisScore()
+   *  and every restore path already expect, regardless of how the two
+   *  categories are interleaved in the live combined list. lineBuilderFn
+   *  is _buildWhyLine for saving, _buildWhyDisplayLine for read-only
+   *  display contexts — kept as a parameter so this loop/split logic
+   *  isn't duplicated at each of the ~5 call sites that need it. */
+  function _collectWhyLines(lineBuilderFn) {
+    let rootNum = 0, outflowNum = 0;
+    const rootLines = [], outflowLines = [];
+    for (let i = 1; i <= whyCount; i++) {
+      const category = whyCategories[i] || 'root';
+      const outputNum = category === 'root' ? ++rootNum : ++outflowNum;
+      const line = lineBuilderFn(i, outputNum);
+      if (!line) continue;
+      if (category === 'root') rootLines.push(line); else outflowLines.push(line);
+    }
+    return { rootLines, outflowLines };
+  }
+
+  /** Rebuilds the unified 5-Why list from a claim's saved
+   *  rootCauseAnalysis + outflowAnalysis fields — shared by
+   *  openInvestigationWorkspace() and applyReferredClaim() (both used to
+   *  duplicate this parsing twice, once per old separate section). Root
+   *  Cause rows are recreated first, Outflow rows after — the exact
+   *  original interleave order between the two categories isn't
+   *  preserved (they've been saved as two independent fields since
+   *  before this feature existed), but every row's own Question, Answer,
+   *  and category are. Always leaves at least one row so there's
+   *  somewhere to start typing. */
+  function _restoreWhyRows(rcText, ofText) {
+    document.getElementById('whyContainer').innerHTML = '';
+    whyCount = 0; whyCategories = {};
+
+    const addFromText = (text, category, stripSolution) => {
+      if (!text || text === 'N/A') return;
+      const scanText = stripSolution ? text.split(/Solution:\s*/i)[0] : text;
+      const m = scanText.match(/Why\s*(\d+):\s*(.*?)(?:\s*\[REAL\])?$/gim);
+      if (!m) return;
+      m.forEach(line => {
+        const parsed = _parseWhyLine(line);
+        addWhyRow(category);
+        const i = whyCount;
+        if (parsed) {
+          document.getElementById(`whyQuestion_${i}`).value = parsed.question;
+          document.getElementById(`whyInput_${i}`).value = parsed.answer;
+        }
+      });
+    };
+    addFromText(rcText, 'root', true);
+    addFromText(ofText, 'outflow', false);
+    if (whyCount === 0) addWhyRow('root');
   }
 
   /** Parses ONE saved "Why N: ..." line back into {num, question, answer,
@@ -6668,8 +6705,7 @@
 
     // 4. Trouble Analysis Detail — pull from the live 5-Why DOM (Tab 4)
     const evalAnalysisWrap = document.getElementById('evalAnalysisWrap');
-    let rText = []; for (let i = 1; i <= rootWhyCount; i++) { const line = _buildWhyDisplayLine('root', i, rootRealIndex===i, '[REAL ROOT]'); if (line) rText.push(line); }
-    let oText = []; for (let i = 1; i <= outflowWhyCount; i++) { const line = _buildWhyDisplayLine('outflow', i, outflowRealIndex===i, '[REAL OUTFLOW]'); if (line) oText.push(line); }
+    const { rootLines: rText, outflowLines: oText } = _collectWhyLines(_buildWhyDisplayLine);
     if (rText.length || oText.length) {
       evalAnalysisWrap.innerHTML =
         `<strong style="font-size:11px;">Root Cause Analysis</strong><div style="margin:2px 0 8px 0;">${rText.join('<br>') || '-'}</div>` +
@@ -9369,9 +9405,14 @@
     btn.innerText='✅ Confirm Team'; btn.disabled=false; refreshConfirmBtn();
   }
 
-  /* ── DUAL 5-WHY ── */
-  let rootWhyCount = 0; let outflowWhyCount = 0;
-  let rootRealIndex = null; let outflowRealIndex = null;
+  /* ── UNIFIED 5-WHY ── */
+  // One shared list of Why rows (was two separate Root Cause / Outflow
+  // 5-Why sections) — per request, each row now picks its OWN category
+  // (Root Cause or Outflow) instead of the old single "[REAL]" marker per
+  // section. whyCategories maps row number -> 'root' | 'outflow'; a row
+  // with no entry yet defaults to 'root' (see _buildWhyLine/_collectWhyLines).
+  let whyCount = 0;
+  let whyCategories = {};
 
   /** 5-Why row — split into a dedicated QUESTION field (what's being
    *  asked at this level) and ANSWER field (the actual finding), per
@@ -9380,103 +9421,112 @@
    *  that conflated the two. Row 2+ auto-suggests its Question from the
    *  PREVIOUS row's Answer ("Why did <previous answer> happen?"), matching
    *  real 5-Whys practice where each question chains off the last
-   *  answer — still fully editable, just a starting point. */
-  function addSpecificWhyRow(containerId, type) {
-    if (type==='root') rootWhyCount++; else outflowWhyCount++;
-    const currentCount = type==='root' ? rootWhyCount : outflowWhyCount;
-    const container = document.getElementById(containerId);
+   *  answer — still fully editable, just a starting point.
+   *  defaultCategory lets restore logic (openInvestigationWorkspace,
+   *  applyReferredClaim) create a row already tagged correctly; a
+   *  brand-new row from the "+ Add Why" button just continues whatever
+   *  category the PREVIOUS row was on (a 5-Why chain is usually several
+   *  Root Cause questions in a row before it turns into Outflow ones). */
+  function addWhyRow(defaultCategory) {
+    whyCount++;
+    const currentCount = whyCount;
+    const container = document.getElementById('whyContainer');
     const row = document.createElement('div'); row.className = 'why-row';
-    row.id = `whyRow_${type}_${currentCount}`;
-    const markLabel = type==='root' ? '[R]' : '[O]';
-    const fnCall = `markRealWhy(${currentCount},'${type}')`;
+    row.id = `whyRow_${currentCount}`;
     let suggestedQuestion = '';
     if (currentCount > 1) {
-      const prevAnswer = document.getElementById(`${type}WhyInput_${currentCount - 1}`)?.value?.trim();
+      const prevAnswer = document.getElementById(`whyInput_${currentCount - 1}`)?.value?.trim();
       if (prevAnswer) suggestedQuestion = `Why did "${prevAnswer}" happen?`;
     }
+    const category = defaultCategory || whyCategories[currentCount - 1] || 'root';
+    whyCategories[currentCount] = category;
     row.innerHTML = `
       <div class="why-number">${currentCount}</div>
       <div class="why-qa-wrap">
         <div class="why-qa-header">
           <span class="why-qa-title">Why #${currentCount}</span>
-          <div style="display:flex; gap:6px;">
-            <button type="button" class="action-btn ${type==='root'?'btn-root':'btn-outflow'}" id="btn${type}_${currentCount}" onclick="${fnCall}" title="Mark as Real">Mark ${markLabel}</button>
-            <button type="button" class="why-remove-btn" data-why-remove onclick="removeWhyRow(${currentCount},'${type}')" title="Remove this Why">✕</button>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <div class="why-cat-toggle">
+              <button type="button" class="why-cat-btn cat-root" id="whyCat_${currentCount}_root" onclick="setWhyCategory(${currentCount},'root')">Root Cause</button>
+              <button type="button" class="why-cat-btn cat-outflow" id="whyCat_${currentCount}_outflow" onclick="setWhyCategory(${currentCount},'outflow')">Outflow</button>
+            </div>
+            <button type="button" class="why-remove-btn" data-why-remove onclick="removeWhyRow(${currentCount})" title="Remove this Why">✕</button>
           </div>
         </div>
         <div class="why-field">
           <label>Question</label>
-          <input type="text" id="${type}WhyQuestion_${currentCount}" placeholder="Why did this happen?" value="${escapeHtml(suggestedQuestion)}">
+          <input type="text" id="whyQuestion_${currentCount}" placeholder="Why did this happen?" value="${escapeHtml(suggestedQuestion)}">
         </div>
         <div class="why-field">
           <label>Answer</label>
-          <textarea id="${type}WhyInput_${currentCount}" placeholder="Because…"></textarea>
+          <textarea id="whyInput_${currentCount}" placeholder="Because…"></textarea>
         </div>
       </div>`;
     container.appendChild(row);
+    _refreshWhyCategoryButtons(currentCount);
+  }
+
+  /** Tags one Why row as Root Cause or Outflow — replaces the old single
+   *  "[REAL]" marker per section (per request: "choose Root Cause and
+   *  Outflow from each of question and answer of 5 Why"). Every row
+   *  always belongs to exactly one category (no "unmarked" state), so
+   *  this is a straight reassignment, not a toggle-off like the old
+   *  markRealWhy(). */
+  function setWhyCategory(n, category) {
+    whyCategories[n] = category;
+    _refreshWhyCategoryButtons(n);
+  }
+
+  function _refreshWhyCategoryButtons(n) {
+    const rootBtn = document.getElementById(`whyCat_${n}_root`);
+    const outflowBtn = document.getElementById(`whyCat_${n}_outflow`);
+    const category = whyCategories[n] || 'root';
+    if (rootBtn) rootBtn.classList.toggle('selected', category === 'root');
+    if (outflowBtn) outflowBtn.classList.toggle('selected', category === 'outflow');
   }
 
   /** Removes one 5-Why row AND renumbers every row above it down by one —
    *  both the visible "Why #N" label and every element id that encodes N
-   *  (Question/Answer inputs, the Mark Real/Remove buttons and their
-   *  onclick handlers) — same "processed in ascending order, freed number
+   *  (Question/Answer inputs, category buttons, the Remove button and its
+   *  onclick handler) — same "processed in ascending order, freed number
    *  genuinely reused by the next Add" approach as removeInspectionBlock().
-   *  Also keeps rootRealIndex/outflowRealIndex pointing at the SAME row's
-   *  content: cleared if the removed row WAS the marked-real one, shifted
-   *  down by one if the marked row sat above the one removed. */
-  function removeWhyRow(n, type) {
-    const count = type === 'root' ? rootWhyCount : outflowWhyCount;
-    const row = document.getElementById(`whyRow_${type}_${n}`);
+   *  whyCategories is re-keyed the same way so each row's Root Cause/
+   *  Outflow tag stays with its own content through the shift. */
+  function removeWhyRow(n) {
+    const row = document.getElementById(`whyRow_${n}`);
     if (row) row.remove();
+    delete whyCategories[n];
 
-    let realIndex = type === 'root' ? rootRealIndex : outflowRealIndex;
-    if (realIndex === n) realIndex = null;
-    else if (realIndex !== null && realIndex > n) realIndex--;
-
-    for (let i = n + 1; i <= count; i++) {
+    for (let i = n + 1; i <= whyCount; i++) {
       const from = i, to = i - 1;
-      const fromRow = document.getElementById(`whyRow_${type}_${from}`);
+      const fromRow = document.getElementById(`whyRow_${from}`);
       if (!fromRow) continue;
-      fromRow.id = `whyRow_${type}_${to}`;
+      fromRow.id = `whyRow_${to}`;
 
       const numberEl = fromRow.querySelector('.why-number');
       if (numberEl) numberEl.textContent = to;
       const titleEl = fromRow.querySelector('.why-qa-title');
       if (titleEl) titleEl.textContent = `Why #${to}`;
 
-      const markBtn = fromRow.querySelector(`#btn${type}_${from}`);
-      if (markBtn) { markBtn.id = `btn${type}_${to}`; markBtn.setAttribute('onclick', `markRealWhy(${to},'${type}')`); }
+      const rootBtn = fromRow.querySelector(`#whyCat_${from}_root`);
+      if (rootBtn) { rootBtn.id = `whyCat_${to}_root`; rootBtn.setAttribute('onclick', `setWhyCategory(${to},'root')`); }
+      const outflowBtn = fromRow.querySelector(`#whyCat_${from}_outflow`);
+      if (outflowBtn) { outflowBtn.id = `whyCat_${to}_outflow`; outflowBtn.setAttribute('onclick', `setWhyCategory(${to},'outflow')`); }
 
       const removeBtn = fromRow.querySelector('[data-why-remove]');
-      if (removeBtn) removeBtn.setAttribute('onclick', `removeWhyRow(${to},'${type}')`);
+      if (removeBtn) removeBtn.setAttribute('onclick', `removeWhyRow(${to})`);
 
-      const qInput = fromRow.querySelector(`#${type}WhyQuestion_${from}`);
-      if (qInput) qInput.id = `${type}WhyQuestion_${to}`;
+      const qInput = fromRow.querySelector(`#whyQuestion_${from}`);
+      if (qInput) qInput.id = `whyQuestion_${to}`;
 
-      const aInput = fromRow.querySelector(`#${type}WhyInput_${from}`);
-      if (aInput) aInput.id = `${type}WhyInput_${to}`;
+      const aInput = fromRow.querySelector(`#whyInput_${from}`);
+      if (aInput) aInput.id = `whyInput_${to}`;
+
+      whyCategories[to] = whyCategories[from];
     }
+    delete whyCategories[whyCount];
 
-    if (type === 'root') { rootWhyCount--; rootRealIndex = realIndex; }
-    else { outflowWhyCount--; outflowRealIndex = realIndex; }
-
-    // Re-apply the "selected" highlight after renumbering — the button id
-    // that now matches realIndex may not be the DOM node that had the
-    // class before the shift above.
-    document.querySelectorAll(type==='root'?'.btn-root':'.btn-outflow').forEach(b => b.classList.remove('selected'));
-    if (realIndex !== null) {
-      const btn = document.getElementById(`btn${type}_${realIndex}`);
-      if (btn) btn.classList.add('selected');
-    }
-  }
-
-  function markRealWhy(index, type) {
-    document.querySelectorAll(type==='root'?'.btn-root':'.btn-outflow').forEach(b => b.classList.remove('selected'));
-    if (type==='root') {
-      if (rootRealIndex!==index) { document.getElementById(`btnroot_${index}`).classList.add('selected'); rootRealIndex=index; } else rootRealIndex=null;
-    } else {
-      if (outflowRealIndex!==index) { document.getElementById(`btnoutflow_${index}`).classList.add('selected'); outflowRealIndex=index; } else outflowRealIndex=null;
-    }
+    whyCount--;
   }
 
   /* ── MULTI-BLOCK INSPECTION (unlimited) ── */
@@ -9606,10 +9656,7 @@
       });
 
       // Whys
-      let rData = [];
-      for (let i=1; i<=rootWhyCount; i++) { const line=_buildWhyLine('root', i, rootRealIndex===i); if(line) rData.push(line); }
-      let oData = [];
-      for (let i=1; i<=outflowWhyCount; i++) { const line=_buildWhyLine('outflow', i, outflowRealIndex===i); if(line) oData.push(line); }
+      const { rootLines: rData, outflowLines: oData } = _collectWhyLines(_buildWhyLine);
 
       // Actions — read files from live input OR fall back to existing photos, tag filenames with block type+number
       // NOTE: image collection is intentionally OUTSIDE the `if (t)` text
@@ -9909,8 +9956,7 @@
     findingRiskBlocks  = [];            // clear Finding Risk blocks immediately
     findingRiskCounter = 0;
     investigationImageStore = claim._photos ? Object.assign({}, claim._photos) : {};
-    rootWhyCount = 0; rootRealIndex = null;
-    outflowWhyCount = 0; outflowRealIndex = null;
+    whyCount = 0; whyCategories = {};
     evaluateScores = {};               // clear self-evaluation picks from any previous claim
     evaluateInputs = {};
     const evalLockedReset = document.getElementById('evaluateLocked');
@@ -10026,26 +10072,11 @@
       restoreAllPreviewsFromUrls(invImgRaw, considImgRaw);
     }
 
-    // Auto-fill Root Cause
-    document.getElementById('rootWhyContainer').innerHTML = ""; rootWhyCount=0; rootRealIndex=null;
+    // Auto-fill 5-Why (Root Cause + Outflow, unified list — see _restoreWhyRows())
     // claims.js uses "troubleAnalysis" for the combined root cause + outflow field
     const rcText = resolveField(claim, ['rootCauseAnalysis','RootCauseAnalysis','troubleAnalysis','TroubleAnalysis'], '');
-    if (rcText && rcText !== "N/A") {
-      const parts = rcText.split(/Solution:\s*/i);
-
-      const m = parts[0].match(/Why\s*(\d+):\s*(.*?)(?:\s*\[REAL\])?$/gim);
-      if(m) m.forEach(line=>{ const parsed=_parseWhyLine(line); addSpecificWhyRow('rootWhyContainer','root'); const i=rootWhyCount; if(parsed){ document.getElementById(`rootWhyQuestion_${i}`).value=parsed.question; document.getElementById(`rootWhyInput_${i}`).value=parsed.answer; if(parsed.real) markRealWhy(i,'root'); } });
-    }
-    if (rootWhyCount===0) addSpecificWhyRow('rootWhyContainer','root');
-
-    // Auto-fill Outflow
-    document.getElementById('outflowWhyContainer').innerHTML = ""; outflowWhyCount=0; outflowRealIndex=null;
     const ofText = resolveField(claim, ['outflowAnalysis','OutflowAnalysis','outFlow'], '');
-    if (ofText && ofText !== "N/A") {
-      const m = ofText.match(/Why\s*(\d+):\s*(.*?)(?:\s*\[REAL\])?$/gim);
-      if(m) m.forEach(line=>{ const parsed=_parseWhyLine(line); addSpecificWhyRow('outflowWhyContainer','outflow'); const i=outflowWhyCount; if(parsed){ document.getElementById(`outflowWhyQuestion_${i}`).value=parsed.question; document.getElementById(`outflowWhyInput_${i}`).value=parsed.answer; if(parsed.real) markRealWhy(i,'outflow'); } });
-    }
-    if (outflowWhyCount===0) addSpecificWhyRow('outflowWhyContainer','outflow');
+    _restoreWhyRows(rcText, ofText);
 
     // Auto-fill Actions (with due date)
     //
@@ -10230,23 +10261,10 @@
     }
     if (inspectionBlockCount === 0) addInspectionBlock();
 
-    // ── Root Cause / Outflow Whys ──
-    document.getElementById('rootWhyContainer').innerHTML = ''; rootWhyCount = 0; rootRealIndex = null;
+    // ── Root Cause / Outflow Whys — unified 5-Why list (see _restoreWhyRows()) ──
     const rcText = resolveField(sourceClaim, ['rootCauseAnalysis','RootCauseAnalysis','troubleAnalysis','TroubleAnalysis'], '');
-    if (rcText && rcText !== 'N/A') {
-      const parts = rcText.split(/Solution:\s*/i);
-      const m = parts[0].match(/Why\s*(\d+):\s*(.*?)(?:\s*\[REAL\])?$/gim);
-      if (m) m.forEach(line => { const parsed=_parseWhyLine(line); addSpecificWhyRow('rootWhyContainer','root'); const i = rootWhyCount; if(parsed){ document.getElementById(`rootWhyQuestion_${i}`).value=parsed.question; document.getElementById(`rootWhyInput_${i}`).value=parsed.answer; if(parsed.real) markRealWhy(i,'root'); } });
-    }
-    if (rootWhyCount === 0) addSpecificWhyRow('rootWhyContainer','root');
-
-    document.getElementById('outflowWhyContainer').innerHTML = ''; outflowWhyCount = 0; outflowRealIndex = null;
     const ofText = resolveField(sourceClaim, ['outflowAnalysis','OutflowAnalysis','outFlow'], '');
-    if (ofText && ofText !== 'N/A') {
-      const m = ofText.match(/Why\s*(\d+):\s*(.*?)(?:\s*\[REAL\])?$/gim);
-      if (m) m.forEach(line => { const parsed=_parseWhyLine(line); addSpecificWhyRow('outflowWhyContainer','outflow'); const i = outflowWhyCount; if(parsed){ document.getElementById(`outflowWhyQuestion_${i}`).value=parsed.question; document.getElementById(`outflowWhyInput_${i}`).value=parsed.answer; if(parsed.real) markRealWhy(i,'outflow'); } });
-    }
-    if (outflowWhyCount === 0) addSpecificWhyRow('outflowWhyContainer','outflow');
+    _restoreWhyRows(rcText, ofText);
 
     // ── Corrective / Preventive action blocks ──
     document.getElementById('correctiveWrap').innerHTML = ''; document.getElementById('preventiveWrap').innerHTML = '';
@@ -12884,8 +12902,7 @@
       // ── Trouble Analysis Section ──
       const analysisSection = document.createElement('div');
       analysisSection.style.cssText = 'page-break-before:always; break-before:page;';
-      let rText=[]; for(let i=1;i<=rootWhyCount;i++){const line=_buildWhyDisplayLine('root', i, rootRealIndex===i, '[REAL ROOT]'); if(line) rText.push(line);}
-      let oText=[]; for(let i=1;i<=outflowWhyCount;i++){const line=_buildWhyDisplayLine('outflow', i, outflowRealIndex===i, '[REAL OUTFLOW]'); if(line) oText.push(line);}
+      const { rootLines: rText, outflowLines: oText } = _collectWhyLines(_buildWhyDisplayLine);
       analysisSection.innerHTML = `
         <div style="font-size:13px; font-weight:800; border-bottom:1px solid #171717; padding-bottom:3px; color:#DA0037; text-transform:uppercase; margin:12px 0 8px 0;">Trouble Analysis →</div>
         <div style="margin-left:10px; font-size:11px;">
@@ -12893,8 +12910,6 @@
           <div style="margin-left:15px; margin-bottom:8px; white-space:pre-wrap;">${rText.join('\n')||'-'}</div>
           <strong>2. Out Flow Analysis:</strong>
           <div style="margin-left:15px; margin-bottom:8px; white-space:pre-wrap;">${oText.join('\n')||'-'}</div>
-          <strong>Conclusion &amp; Solution:</strong>
-
         </div>`;
       bodyCell.appendChild(analysisSection);
 

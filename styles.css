@@ -1119,10 +1119,12 @@ textarea.form-control {
 
 /* Root Cause & Outflow action buttons */
 .action-btn { padding: 6px 10px; font-size: 11px; font-weight: 700; border-radius: var(--r-sm); border: none; cursor: pointer; transition: 0.2s; }
-.btn-root { background: var(--surface-2); color: var(--charcoal); border: 1px solid var(--border); }
-.btn-outflow { background: var(--surface-2); color: var(--charcoal); border: 1px solid var(--border); }
-.btn-root.selected { background: #fee2e2; color: #dc2626; border-color: #f87171; }
-.btn-outflow.selected { background: #e0e7ff; color: #4f46e5; border-color: #818cf8; }
+/* Root Cause / Outflow category toggle — per-row now (was per-section
+   "Mark Real"): exactly one of these two is active per Why row. */
+.why-cat-toggle { display: flex; border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; }
+.why-cat-btn { padding: 6px 10px; font-size: 11px; font-weight: 700; border: none; background: var(--surface-2); color: var(--charcoal-soft); cursor: pointer; transition: 0.2s; }
+.why-cat-btn.cat-root.selected { background: #fee2e2; color: #dc2626; }
+.why-cat-btn.cat-outflow.selected { background: #e0e7ff; color: #4f46e5; }
 .why-remove-btn { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface-2); color: var(--charcoal-soft); font-size: 13px; line-height: 1; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; padding: 0; }
 .why-remove-btn:hover { background: #fee2e2; color: #dc2626; border-color: #f87171; }
 
